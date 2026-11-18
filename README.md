@@ -25,7 +25,7 @@ swift test                 # layout engine tests
 open build/TextGrabber.app
 ```
 
-The script signs ad hoc, so macOS asks for Screen Recording permission again after each rebuild. To avoid that, sign with a fixed identity: `SIGN_IDENTITY="My Identity" ./scripts/build-app.sh`.
+Run `./scripts/setup-signing.sh` once before the first build. It creates a self-signed signing identity in its own keychain, so rebuilt apps keep their macOS permissions. Without it the app is signed ad hoc, and macOS asks for Screen Recording and Accessibility again after every rebuild (and keeps asking until the stale entry is cleared with `tccutil reset ScreenCapture app.textgrabber.TextGrabber`).
 
 ## Tests
 

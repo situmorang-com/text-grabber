@@ -1,9 +1,9 @@
 #!/bin/bash
-# Builds build/TextGrabber.app. Set SIGN_IDENTITY to a code-signing identity to keep macOS permissions across rebuilds.
+# Builds build/TextGrabber.app, signed with the identity from scripts/setup-signing.sh (or SIGN_IDENTITY, or ad hoc).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-0.2.1}"
 APP="build/TextGrabber.app"
 
 swift build -c release --arch arm64 --arch x86_64
@@ -55,5 +55,18 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign "${SIGN_IDENTITY:--}" --identifier app.textgrabber.TextGrabber "$APP"
+# Sign with the local identity from scripts/setup-signing.sh when it exists, so macOS permissions survive rebuilds.
+KEYCHAIN="$HOME/Library/Keychains/textgrabber-signing.keychain-db"
+SECRET="$HOME/.config/textgrabber/signing-keychain-password"
+if [ -n "${SIGN_IDENTITY:-}" ]; then
+  codesign --force --sign "$SIGN_IDENTITY" --identifier app.textgrabber.TextGrabber "$APP"
+elif [ -f "$KEYCHAIN" ] && [ -f "$SECRET" ]; then
+  security unlock-keychain -p "$(cat "$SECRET")" "$KEYCHAIN"
+  IDENTITY=$(security find-identity -p codesigning "$KEYCHAIN" | awk '/TextGrabber Local Signing/{print $2; exit}')
+  codesign --force --sign "$IDENTITY" --keychain "$KEYCHAIN" --identifier app.textgrabber.TextGrabber "$APP"
+else
+  echo "No signing identity: signing ad hoc. macOS will ask for permissions again after each rebuild."
+  echo "Run scripts/setup-signing.sh once to avoid that."
+  codesign --force --sign - --identifier app.textgrabber.TextGrabber "$APP"
+fi
 echo "Built $APP ($(lipo -archs "$APP/Contents/MacOS/TextGrabber"))"

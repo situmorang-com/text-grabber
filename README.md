@@ -9,6 +9,14 @@ A macOS menu bar app that copies text from anything on screen: select an area, a
 - Drop image or PDF files on the app icon to read them.
 - The first capture asks for Screen Recording permission. Grant it, then quit and reopen the app.
 
+## Emoji and symbols
+
+Apple's text recognition cannot read emoji or symbols such as ⌘ and ⇧. When the area you capture is a real app window, TextGrabber reads that window's own text through the Accessibility API and uses it for every line it can match, so those characters come out right. The confirmation says "exact text from the app" when this happened.
+
+It needs a second permission: Settings → Recognition → Grant Access. Without it, captures still work with recognition alone. Images, videos and apps that expose no text also fall back to recognition alone.
+
+To see what an app exposes at a screen point: `TextGrabber --ax-at 400,300` (the terminal you run it from needs Accessibility access).
+
 ## Build
 
 ```sh
@@ -23,6 +31,7 @@ The script signs ad hoc, so macOS asks for Screen Recording permission again aft
 
 - `LayoutEngineTests`: the layout rules on synthetic fragments.
 - `CaptureCorpusTests`: real recognition on every image in `Tests/TextGrabberCoreTests/Fixtures/captures`, compared with the text file beside it. Add real screenshots there; see its README.
+- `ExactTextTests`: restoring emoji and symbols from an app's text, using misreads Apple's recognition really produced.
 
 The first run in a fresh build can take about a minute while macOS prepares the recognition models; later runs take about a second.
 
@@ -44,6 +53,7 @@ build/TextGrabber.app/Contents/MacOS/TextGrabber --help
 |---|---|
 | `Sources/TextGrabberCore/LayoutEngine.swift` | Turns OCR fragments into text: reading order, columns, tables, paragraphs, hyphenation |
 | `Sources/TextGrabberCore/Recognizer.swift` | Vision text and barcode recognition, image upscaling, PDF pages |
+| `Sources/TextGrabberCore/ExactText.swift` | Matches recognised lines against an app's real text to restore emoji and symbols |
 | `Sources/TextGrabber/` | The menu bar app: capture, shortcuts, clipboard, HUD, history, settings, CLI |
 | `Tests/TextGrabberCoreTests/` | Layout engine tests |
 | `research/` | What other screen-text apps offer, from public sources |

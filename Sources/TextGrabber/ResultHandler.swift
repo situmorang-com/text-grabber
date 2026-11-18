@@ -16,7 +16,7 @@ final class ResultHandler {
 
     var isSpeaking: Bool { synthesizer.isSpeaking }
 
-    func deliver(_ text: String, kind: ResultKind) {
+    func deliver(_ text: String, kind: ResultKind, note: String? = nil) {
         cancelProgress()
         guard !text.isEmpty else {
             hud.show(symbol: kind == .barcode ? "qrcode.viewfinder" : "text.magnifyingglass",
@@ -34,7 +34,7 @@ final class ResultHandler {
         hud.show(symbol: "checkmark.circle.fill",
                  title: additive ? "Added to clipboard" : "Copied",
                  detail: preview(text),
-                 footnote: "\(words) word\(words == 1 ? "" : "s") · \(text.count) characters")
+                 footnote: "\(words) word\(words == 1 ? "" : "s") · \(text.count) characters" + (note.map { " · " + $0 } ?? ""))
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
                              userInfo: [.announcement: "Text copied to clipboard"])
 

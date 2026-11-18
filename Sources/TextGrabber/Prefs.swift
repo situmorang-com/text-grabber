@@ -20,6 +20,7 @@ enum Prefs {
         static let showHUD = "showHUD"
         static let keepHistory = "keepHistory"
         static let lastRect = "lastCaptureRect"
+        static let exactText = "useExactTextFromApps"
     }
 
     static let defaults = UserDefaults.standard
@@ -41,6 +42,7 @@ enum Prefs {
             Key.muteShutter: true,
             Key.showHUD: true,
             Key.keepHistory: true,
+            Key.exactText: true,
         ])
     }
 

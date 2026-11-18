@@ -1,0 +1,170 @@
+import Foundation
+
+/// Repairs OCR lines with the real text of the window they were captured from.
+///
+/// OCR cannot read emoji or symbols such as ⌘ and ⇧: it drops them or substitutes a lookalike. When the
+/// app under the capture exposes its text (through the Accessibility API), each OCR line is located inside
+/// that text by approximate matching, and the real characters are used instead.
+public enum ExactText {
+    public struct Outcome: Equatable {
+        public var lines: [String]
+        /// How many lines were replaced by text from a source.
+        public var replaced: Int
+    }
+
+    /// - Parameters:
+    ///   - lines: OCR text, one entry per recognised line.
+    ///   - candidates: for each line, the indices of the `sources` found at its position on screen.
+    ///   - sources: text read from the apps under the capture.
+    ///   - tolerance: the share of a line's characters that may differ and still count as the same text.
+    public static func refine(lines: [String], candidates: [[Int]], sources: [String], tolerance: Double = 0.3) -> Outcome {
+        var encoder = Encoder()
+        let sourceCharacters = sources.map { Array($0.prefix(maxSourceLength)) }
+        let sourceCodes = sourceCharacters.map { encoder.encode($0) }
+
+        struct Match { var source: Int; var range: Range<Int>; var distance: Int }
+        var matches: [Match?] = Array(repeating: nil, count: lines.count)
+
+        for (index, line) in lines.enumerated() {
+            let pattern = Array(line.trimmingCharacters(in: .whitespacesAndNewlines))
+            guard pattern.count >= 3, index < candidates.count else { continue }
+            let codes = encoder.encode(pattern)
+            let allowed = max(1, Int(Double(pattern.count) * tolerance))
+            var best: Match?
+            for source in candidates[index] where source < sourceCodes.count {
+                guard let found = approximateMatch(of: codes, in: sourceCodes[source]), found.distance <= allowed else { continue }
+                if best == nil || found.distance < best!.distance {
+                    best = Match(source: source, range: found.range, distance: found.distance)
+                }
+            }
+            matches[index] = best
+        }
+
+        // OCR may have dropped an emoji at either end of a line without leaving a trace.
+        // Give such neighbours to the line they touch: first to the line before them, then to the line after.
+        var claimed: [Int: [Range<Int>]] = [:]
+        for match in matches.compactMap({ $0 }) { claimed[match.source, default: []].append(match.range) }
+        func isFree(_ position: Int, in source: Int) -> Bool {
+            !(claimed[source] ?? []).contains { $0.contains(position) }
+        }
+        for forward in [true, false] {
+            for index in matches.indices {
+                guard var match = matches[index] else { continue }
+                let characters = sourceCharacters[match.source]
+                var edge = forward ? match.range.upperBound : match.range.lowerBound
+                var taken = 0
+                while taken < 4 {
+                    var probe = forward ? edge : edge - 1
+                    // Allow one space between the text and the symbol.
+                    if probe >= 0, probe < characters.count, characters[probe] == " " { probe += forward ? 1 : -1 }
+                    guard probe >= 0, probe < characters.count, isUnreadable(characters[probe]), isFree(probe, in: match.source) else { break }
+                    edge = forward ? probe + 1 : probe
+                    taken += 1
+                }
+                guard taken > 0 else { continue }
+                let grown = forward ? match.range.lowerBound..<edge : edge..<match.range.upperBound
+                claimed[match.source, default: []].append(grown)
+                match.range = grown
+                matches[index] = match
+            }
+        }
+
+        var output = lines
+        var replaced = 0
+        for (index, match) in matches.enumerated() {
+            guard let match else { continue }
+            let exact = String(sourceCharacters[match.source][match.range])
+                .replacingOccurrences(of: "\n", with: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Leave the line alone when the only difference is spacing: OCR is right about what is visible.
+            if skeleton(exact) == skeleton(lines[index]) { continue }
+            output[index] = exact
+            replaced += 1
+        }
+        return Outcome(lines: output, replaced: replaced)
+    }
+
+    public static let maxSourceLength = 8000
+
+    // MARK: Matching
+
+    /// The stretch of `text` closest to `pattern` (Sellers' algorithm), with the number of edits between them.
+    static func approximateMatch(of pattern: [Int32], in text: [Int32]) -> (range: Range<Int>, distance: Int)? {
+        let m = pattern.count, n = text.count
+        guard m > 0, n > 0 else { return nil }
+        // Column by column; `starts` remembers where the best alignment ending here began.
+        var previous = Array(0...m)
+        var previousStarts = Array(repeating: 0, count: m + 1)
+        var current = previous
+        var currentStarts = previousStarts
+        var best = (distance: Int.max, start: 0, end: 0)
+
+        for j in 1...n {
+            current[0] = 0
+            currentStarts[0] = j
+            let character = text[j - 1]
+            for i in 1...m {
+                let substitute = previous[i - 1] + (pattern[i - 1] == character ? 0 : 1)
+                let skipText = current[i - 1] + 1      // pattern character with nothing in the text
+                let skipPattern = previous[i] + 1      // text character the pattern lacks
+                if substitute <= skipText && substitute <= skipPattern {
+                    current[i] = substitute
+                    currentStarts[i] = previousStarts[i - 1]
+                } else if skipPattern <= skipText {
+                    current[i] = skipPattern
+                    currentStarts[i] = previousStarts[i]
+                } else {
+                    current[i] = skipText
+                    currentStarts[i] = currentStarts[i - 1]
+                }
+            }
+            if current[m] <= best.distance {
+                best = (current[m], currentStarts[m], j)
+            }
+            swap(&previous, &current)
+            swap(&previousStarts, &currentStarts)
+            previousStarts[0] = j
+        }
+        guard best.distance != Int.max, best.start < best.end else { return nil }
+        return (best.start..<best.end, best.distance)
+    }
+
+    /// Maps characters to small integers so comparing them is cheap. Case and typographic variants share a code.
+    struct Encoder {
+        private var codes: [String: Int32] = [:]
+
+        mutating func encode(_ characters: [Character]) -> [Int32] {
+            characters.map { character in
+                let key = Self.fold(character)
+                if let code = codes[key] { return code }
+                let code = Int32(codes.count)
+                codes[key] = code
+                return code
+            }
+        }
+
+        static func fold(_ character: Character) -> String {
+            switch character {
+            case "’", "‘", "ʼ": return "'"
+            case "“", "”": return "\""
+            case "–", "—", "‐", "‑": return "-"
+            case "\u{00A0}", "\u{202F}", "\n", "\t": return " "
+            default: return character.lowercased()
+            }
+        }
+    }
+
+    /// Characters OCR does not produce: emoji, pictographs, key symbols, private-use glyphs.
+    static func isUnreadable(_ character: Character) -> Bool {
+        guard let scalar = character.unicodeScalars.first else { return false }
+        if scalar.properties.isEmojiPresentation { return true }
+        switch scalar.properties.generalCategory {
+        case .otherSymbol, .modifierSymbol, .privateUse: return scalar.value > 0x00FF
+        default: return false
+        }
+    }
+
+    private static func skeleton(_ text: String) -> String {
+        String(text.filter { !$0.isWhitespace }.map { Encoder.fold($0) }.joined())
+    }
+}

@@ -28,6 +28,8 @@ final class CaptureController {
             arguments += ["-i"]
         }
         if Prefs.bool(Prefs.Key.muteShutter) { arguments += ["-x"] }
+        // No window shadow, so the image covers exactly the recorded rectangle.
+        arguments += ["-o"]
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("textgrabber-\(UUID().uuidString).png")
         arguments += ["-t", "png", file.path]
 
@@ -46,7 +48,7 @@ final class CaptureController {
                     return
                 }
                 if let rect { Prefs.lastRect = rect }
-                self.recognise([image], kind: kind)
+                self.recognise([image], kind: kind, screenRect: Self.rect(from: rect ?? (lastArea ? Prefs.lastRect : nil)))
             }
         }
         isBusy = true
@@ -69,6 +71,11 @@ final class CaptureController {
               let values = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [NSNumber],
               values.count == 4 else { return nil }
         return values.map { String($0.intValue) }.joined(separator: ",")
+    }
+
+    static func rect(from text: String?) -> CGRect? {
+        guard let parts = text?.split(separator: ",").compactMap({ Double($0) }), parts.count == 4 else { return nil }
+        return CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
     }
 
     private func ensureScreenAccess() -> Bool {
@@ -127,7 +134,7 @@ final class CaptureController {
 
     // MARK: Recognition
 
-    private func recognise(_ images: [CGImage], kind: CaptureKind) {
+    private func recognise(_ images: [CGImage], kind: CaptureKind, screenRect: CGRect? = nil) {
         isBusy = true
         output.showProgressIfSlow()
         DispatchQueue.global(qos: .userInitiated).async {
@@ -142,9 +149,16 @@ final class CaptureController {
                 let options = Prefs.recognitionOptions(lineMode: override)
                 var pages: [[TextFragment]] = []
                 var failure: Error?
+                var exactLines = 0
                 for image in images {
                     do { pages.append(try Recognizer.readFragments(in: image, options: options).fragments) }
                     catch { failure = error }
+                }
+                // A screen capture of a real window: swap in the app's own text where it lines up (emoji, symbols).
+                if let screenRect, pages.count == 1, Prefs.bool(Prefs.Key.exactText) {
+                    let refined = AccessibilityText.refine(pages[0], capturedFrom: screenRect)
+                    pages[0] = refined.fragments
+                    exactLines = refined.replaced
                 }
                 DispatchQueue.main.async {
                     self.isBusy = false
@@ -155,7 +169,7 @@ final class CaptureController {
                     if text.isEmpty, let failure {
                         self.output.fail("Text recognition failed", detail: failure.localizedDescription)
                     } else {
-                        self.output.deliver(text, kind: .text)
+                        self.output.deliver(text, kind: .text, note: exactLines > 0 ? "exact text from the app" : nil)
                     }
                 }
             }

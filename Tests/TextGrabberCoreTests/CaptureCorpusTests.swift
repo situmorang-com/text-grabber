@@ -43,6 +43,24 @@ final class CaptureCorpusTests: XCTestCase {
         XCTAssertGreaterThan(checked, 0, "No expected-text files found")
     }
 
+    /// The known gap closes once the window's real text is available: OCR finds the lines, the source supplies the characters.
+    func testEmojiCaptureIsExactWithTheAppsOwnText() throws {
+        let image = try XCTUnwrap(Recognizer.loadImages(from: folder.appendingPathComponent("emoji.png")).first)
+        let expected = try String(contentsOf: folder.appendingPathComponent("emoji.keep.txt"), encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var options = RecognitionOptions()
+        options.lineMode = .keepLines
+        var fragments = try Recognizer.readFragments(in: image, options: options).fragments
+
+        // What an app would report for its window: the same text inside a longer document.
+        let windowText = "Notes\n" + expected + "\nEnd of notes"
+        let outcome = ExactText.refine(lines: fragments.map(\.text), candidates: fragments.map { _ in [0] }, sources: [windowText])
+        for index in fragments.indices { fragments[index].text = outcome.lines[index] }
+
+        XCTAssertEqual(Recognizer.compose(fragments, options: options), expected)
+        XCTAssertGreaterThanOrEqual(outcome.replaced, 2)
+    }
+
     func testSmallTextNeedsUpscaling() throws {
         let image = try XCTUnwrap(Recognizer.loadImages(from: folder.appendingPathComponent("small.png")).first)
         var options = RecognitionOptions()

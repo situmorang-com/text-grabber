@@ -11,6 +11,7 @@ enum CommandLineTool {
       --no-upscale                    Do not enlarge small images first
       --debug                         Print each recognised fragment and its box to stderr
       --languages                     List supported languages
+      --ax-at <x,y>                   Print the text the Accessibility API gives at a screen point (diagnostic)
     """
 
     static func run(_ arguments: [String]) -> Int32 {
@@ -32,6 +33,17 @@ enum CommandLineTool {
             case "--barcode": barcode = true
             case "--no-upscale": options.upscaleSmallImages = false
             case "--debug": debug = true
+            case "--ax-at":
+                let parts = (iterator.next() ?? "").split(separator: ",").compactMap { Double($0) }
+                guard parts.count == 2 else { return fail("--ax-at needs x,y in screen points") }
+                guard AccessibilityText.isTrusted else {
+                    FileHandle.standardError.write(Data("This terminal has no Accessibility access (System Settings → Privacy & Security → Accessibility).\n".utf8))
+                    return 77
+                }
+                let collector = AccessibilityText.Collector(budget: 2)
+                let found = collector.sources(at: CGPoint(x: parts[0], y: parts[1]))
+                for index in found { print("[\(index)] \(collector.texts[index].prefix(400))") }
+                return found.isEmpty ? 2 : 0
             case "--languages":
                 print(Recognizer.supportedLanguages().joined(separator: "\n"))
                 return 0

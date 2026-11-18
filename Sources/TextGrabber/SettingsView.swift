@@ -69,6 +69,9 @@ private struct RecognitionSettings: View {
     @AppStorage(Prefs.Key.upscale) private var upscale = true
     @AppStorage(Prefs.Key.detectColumns) private var detectColumns = true
     @AppStorage(Prefs.Key.detectTables) private var detectTables = true
+    @AppStorage(Prefs.Key.exactText) private var exactText = true
+    @State private var accessibilityGranted = AccessibilityText.isTrusted
+    private let accessCheck = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
     private let languages = Recognizer.supportedLanguages()
 
     var body: some View {
@@ -92,6 +95,20 @@ private struct RecognitionSettings: View {
                 Toggle("Also detect other languages automatically", isOn: $detectsLanguage)
             }
             Section("Accuracy") {
+                Toggle("Use the app's own text when it matches (emoji, ⌘ and other symbols)", isOn: $exactText)
+                if exactText {
+                    HStack {
+                        Image(systemName: accessibilityGranted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(accessibilityGranted ? .green : .orange)
+                        Text(accessibilityGranted ? "Accessibility access is on." : "Needs Accessibility access to read text from other apps.")
+                            .font(.caption)
+                        Spacer()
+                        if !accessibilityGranted {
+                            Button("Grant Access…") { AccessibilityText.requestAccess() }
+                        }
+                    }
+                    .onReceive(accessCheck) { _ in accessibilityGranted = AccessibilityText.isTrusted }
+                }
                 Toggle("Enlarge small captures before reading", isOn: $upscale)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Custom words")

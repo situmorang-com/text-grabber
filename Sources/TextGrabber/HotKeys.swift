@@ -54,7 +54,31 @@ struct Shortcut: Codable, Equatable {
         if modifiers.contains(.option) { text += "⌥" }
         if modifiers.contains(.shift) { text += "⇧" }
         if modifiers.contains(.command) { text += "⌘" }
-        return text + key.uppercased()
+        return text + baseKey.uppercased()
+    }
+
+    /// The key as printed on the keycap: "2", not the "@" that Shift makes of it. Recording stores the character
+    /// the key typed, which includes Shift, so a printable key is named again from the keyboard layout.
+    var baseKey: String {
+        guard key.count == 1, let name = Self.unshiftedCharacter(for: keyCode) else { return key }
+        return name
+    }
+
+    private static func unshiftedCharacter(for keyCode: UInt32) -> String? {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let pointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+        let data = Unmanaged<CFData>.fromOpaque(pointer).takeUnretainedValue() as Data
+        var deadKeys: UInt32 = 0
+        var characters = [UniChar](repeating: 0, count: 4)
+        var length = 0
+        let status = data.withUnsafeBytes { bytes -> OSStatus in
+            guard let layout = bytes.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else { return -1 }
+            return UCKeyTranslate(layout, UInt16(keyCode), UInt16(kUCKeyActionDisplay), 0, UInt32(LMGetKbdType()),
+                                  OptionBits(kUCKeyTranslateNoDeadKeysBit), &deadKeys, characters.count, &length, &characters)
+        }
+        guard status == noErr, length > 0 else { return nil }
+        let name = String(utf16CodeUnits: characters, count: length)
+        return name.unicodeScalars.allSatisfy({ $0.properties.isWhitespace || $0.value < 0x20 }) ? nil : name
     }
 
     static func stored(for action: HotKeyAction) -> Shortcut? {

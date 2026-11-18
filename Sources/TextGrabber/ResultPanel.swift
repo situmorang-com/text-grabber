@@ -85,6 +85,7 @@ final class ResultPanelController {
         }
         panel.setFrameAutosaveName("TextGrabberResultPanel")
         opened = true
+        if WindowSnapshot.isTaking { panel.orderFrontRegardless(); return }
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
     }

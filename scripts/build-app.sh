@@ -1,7 +1,20 @@
 #!/bin/bash
-# Builds TextGrabber.app and installs it to /Applications (pass --no-install to leave it in build/). Signed with the identity from scripts/setup-signing.sh (or SIGN_IDENTITY, or ad hoc).
+# Builds TextGrabber.app and installs it to /Applications. Signed with the identity from scripts/setup-signing.sh
+# (or SIGN_IDENTITY, or ad hoc).
+#   --no-install   leave the app in build/
+#   --fast         this Mac's architecture only, for trying a change (about half the time); release builds omit it
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+INSTALL=1
+ARCHS=(--arch arm64 --arch x86_64)
+for arg in "$@"; do
+  case "$arg" in
+    --no-install) INSTALL=0 ;;
+    --fast) ARCHS=(--arch "$(uname -m)") ;;
+    *) echo "unknown option: $arg"; exit 2 ;;
+  esac
+done
 
 VERSION="${VERSION:-0.4.0}"
 APP="build/TextGrabber.app"
@@ -9,25 +22,30 @@ APP="build/TextGrabber.app"
 # The extra flags make the compiler record the constant values Shortcuts metadata is built from.
 CONST_FLAGS=(-Xswiftc -emit-const-values -Xswiftc -Xfrontend -Xswiftc -const-gather-protocols-file
              -Xswiftc -Xfrontend -Xswiftc "$PWD/scripts/app-intents-protocols.json")
-swift build -c release --arch arm64 --arch x86_64 "${CONST_FLAGS[@]}"
-BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/TextGrabber"
+swift build -c release "${ARCHS[@]}" "${CONST_FLAGS[@]}"
+BIN="$(swift build -c release "${ARCHS[@]}" --show-bin-path)/TextGrabber"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/TextGrabber"
-# SwiftPM records the deployment target (14.0) as the SDK version. macOS then treats the app as built for
-# macOS 14 and withholds newer behaviour: measured, Translation reports every language as "not installed".
-# Stamp the real SDK version, keeping the deployment target.
+# Package.swift links with the real SDK version; without it macOS withholds newer behaviour (Translation says
+# "not installed"). Stop here if that ever stops working.
 SDK_VERSION="$(xcrun --show-sdk-version)"
 for ARCH in $(lipo -archs "$APP/Contents/MacOS/TextGrabber"); do
-  xcrun vtool -arch "$ARCH" -set-build-version macos 14.0 "$SDK_VERSION" -replace \
-    -output "$APP/Contents/MacOS/TextGrabber" "$APP/Contents/MacOS/TextGrabber" 2>/dev/null
+  STAMPED=$(otool -arch "$ARCH" -l "$APP/Contents/MacOS/TextGrabber" | awk '/LC_BUILD_VERSION/{found=1} found && $1=="sdk"{print $2; exit}')
+  if [ "$STAMPED" != "$SDK_VERSION" ]; then
+    echo "The $ARCH binary records SDK $STAMPED, not $SDK_VERSION: check the linker settings in Package.swift."
+    exit 1
+  fi
 done
 
 # Shortcuts actions: Xcode generates this metadata bundle; a Swift package build does not, so run the same tool.
 WORK="$(mktemp -d)"
 find "$PWD/Sources/TextGrabber" -name "*.swift" > "$WORK/sources.txt"
-find "$PWD/.build" -path "*TextGrabber.build*" -name "*.swiftconstvalues" -newer Package.swift | grep -v TextGrabberCore > "$WORK/constvalues.txt" || true
+# The release build's arm64 values (the processor reads one architecture). Not by date: the compiler leaves an
+# unchanged file untouched, so it can be older than Package.swift and still current.
+find "$PWD/.build" -path "*TextGrabber.build/Release/*" -path "*/arm64/*" -name "*.swiftconstvalues" \
+  | grep -v TextGrabberCore > "$WORK/constvalues.txt" || true
 xcrun appintentsmetadataprocessor --output "$APP/Contents/Resources" \
   --toolchain-dir "$(dirname "$(dirname "$(dirname "$(xcrun --find swift)")")")" \
   --module-name TextGrabber --sdk-root "$(xcrun --show-sdk-path)" \
@@ -105,7 +123,7 @@ fi
 echo "Built $APP ($(lipo -archs "$APP/Contents/MacOS/TextGrabber"))"
 
 # Install: one copy only, in /Applications, so Spotlight, the shortcut and open-at-login all use the same app.
-if [ "${1:-}" != "--no-install" ]; then
+if [ "$INSTALL" = 1 ]; then
   INSTALLED="/Applications/TextGrabber.app"
   pkill -x TextGrabber 2>/dev/null && sleep 1 || true
   rm -rf "$INSTALLED"

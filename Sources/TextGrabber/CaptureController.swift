@@ -25,8 +25,10 @@ final class CaptureController {
     /// - Returns: whether a capture started (false when one is already running or access is missing).
     @discardableResult
     func captureScreen(_ kind: CaptureKind, lastArea: Bool = false, probeRect: String? = nil) -> Bool {
-        guard !isBusy else { return false }
-        guard ensureScreenAccess() else { return false }
+        // A probe always answers in the log, so a script waiting for it learns why nothing happened.
+        let probeNote = { (reason: String) in if probeRect != nil { AccessibilityText.writeLog("probe: \(reason)\n") } }
+        guard !isBusy else { probeNote("not started: a capture is already running"); return false }
+        guard ensureScreenAccess() else { probeNote("not started: no Screen Recording access"); return false }
         if Prefs.bool(Prefs.Key.exactText) { AccessibilityText.wakeRunningApps() }
 
         var arguments: [String] = []
@@ -46,7 +48,7 @@ final class CaptureController {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         process.arguments = arguments
-        process.terminationHandler = { [weak self] _ in
+        process.terminationHandler = { [weak self] finished in
             // Take the pixels into memory and remove the file straight away: nothing stays on disk.
             let data = try? Data(contentsOf: file)
             let rect = Self.captureRect(of: file)
@@ -54,6 +56,8 @@ final class CaptureController {
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard let data, let image = ImagePrep.image(from: data) else {
+                    probeNote("screencapture made no image (exit status \(finished.terminationStatus))"
+                              + (Self.screenIsLocked ? "; the screen is locked, which stops every screenshot" : ""))
                     self.isBusy = false   // Esc pressed: nothing to do
                     self.output.cancelPending()
                     return
@@ -80,10 +84,15 @@ final class CaptureController {
             try process.run()
         } catch {
             isBusy = false
+            probeNote("screencapture could not start: \(error.localizedDescription)")
             output.fail("Screen capture could not start", detail: error.localizedDescription)
             return false
         }
         return true
+    }
+
+    static var screenIsLocked: Bool {
+        (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
     }
 
     /// The selected rectangle, which macOS records on the screenshot file itself.

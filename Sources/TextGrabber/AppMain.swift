@@ -94,8 +94,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "selftest-scrolling":
             if let path = value("path"), let image = NSImage(contentsOfFile: path) { capture.scrolling.selfTest(image: image) }
         case "probe":
-            guard let rect = value("rect"), CaptureController.rect(from: rect) != nil else { return }
+            guard let rect = value("rect"), CaptureController.rect(from: rect) != nil else {
+                AccessibilityText.writeLog("probe: rect \"\(value("rect") ?? "")\" is not x,y,w,h\n")
+                return
+            }
             capture.captureScreen(.text(nil), probeRect: rect)
+        case "snapshot":
+            // textgrabber://snapshot?window=setup|settings|history|editor: opens it, then draws it to a PNG.
+            // It does not take focus from the app the user is in, and closes the window again if it was closed.
+            let name = value("window") ?? "setup"
+            let wasOpen = WindowSnapshot.window(named: name) != nil
+            WindowSnapshot.isTaking = true
+            switch name {
+            case "setup": showSetup()
+            case "settings": showSettings()
+            case "history": showHistory()
+            case "editor": editLast()
+            default: break
+            }
+            WindowSnapshot.isTaking = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                WindowSnapshot.write(name: name)
+                if !wasOpen { WindowSnapshot.window(named: name)?.orderOut(nil) }
+            }
         default:
             output.editNext = false
         }
@@ -190,7 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
         if let shortcut, let stored = Shortcut.stored(for: shortcut) {
-            item.keyEquivalent = stored.key.lowercased()
+            item.keyEquivalent = stored.baseKey.lowercased()
             item.keyEquivalentModifierMask = stored.modifiers
         }
         menu.addItem(item)
@@ -290,6 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func present(_ window: NSWindow?) {
+        if WindowSnapshot.isTaking { window?.orderFrontRegardless(); return }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
     }

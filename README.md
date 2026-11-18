@@ -41,7 +41,7 @@ Apple's text recognition cannot read emoji or symbols such as ⌘ and ⇧. When 
 
 It needs a second permission: Settings → Recognition → Grant Access. Without it, captures still work with recognition alone. Images, videos and apps that expose no text also fall back to recognition alone.
 
-Every screen capture writes a plain account of what happened to `~/Library/Logs/TextGrabber/last-capture.txt`: whether access is on, which app was under the capture, the text it exposed for each line, and which lines were taken from it. `open "textgrabber://probe?rect=x,y,w,h"` reads an area into that log without touching the clipboard.
+Every screen capture writes a plain account of what happened to `~/Library/Logs/TextGrabber/last-capture.txt`: whether access is on, which app was under the capture, the text it exposed for each line, and which lines were taken from it. `open "textgrabber://probe?rect=x,y,w,h"` reads an area into that log without touching the clipboard. `scripts/drive.sh "probe?rect=x,y,w,h"` does the same and prints the log once it is written.
 
 To see what an app exposes at a screen point: `TextGrabber --ax-at 400,300` (the terminal you run it from needs Accessibility access).
 
@@ -50,6 +50,7 @@ To see what an app exposes at a screen point: `TextGrabber --ax-at 400,300` (the
 ```sh
 swift test                 # layout engine tests
 ./scripts/build-app.sh     # builds, installs to /Applications and starts it
+./scripts/build-app.sh --fast   # this Mac's architecture only, for trying a change
 ```
 
 Run `./scripts/setup-signing.sh` once before the first build. It creates a self-signed signing identity in its own keychain, so rebuilt apps keep their macOS permissions. Without it the app is signed ad hoc, and macOS asks for Screen Recording and Accessibility again after every rebuild (and keeps asking until the stale entry is cleared with `tccutil reset ScreenCapture app.textgrabber.TextGrabber`).
@@ -83,7 +84,9 @@ URL actions, for Shortcuts ("Open URL"), Raycast, Alfred or scripts:
 | `textgrabber://clipboard` | Read the image on the clipboard |
 | `textgrabber://open?path=/abs/file.png` | Read files (repeat `path` for several) |
 | `textgrabber://edit-last` | Reopen the last capture in the editor |
-| `textgrabber://history`, `textgrabber://settings` | Open those windows |
+| `textgrabber://history`, `textgrabber://settings`, `textgrabber://setup` | Open those windows |
+| `textgrabber://probe?rect=x,y,w,h` | Read that screen area into the capture log only |
+| `textgrabber://snapshot?window=setup` | Draw a window (`setup`, `settings`, `history`, `editor`) to a PNG in `~/Library/Logs/TextGrabber`, without taking focus; works while the screen is locked |
 
 Add `edit=1` to any capture action to open the editor for that capture.
 

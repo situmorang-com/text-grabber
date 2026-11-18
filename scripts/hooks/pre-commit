@@ -1,5 +1,16 @@
 #!/bin/sh
-# Runs the tests before every commit. Enabled by: git config core.hooksPath scripts/hooks
+# Before every commit: a word check, then the tests.
+# Enabled by: git config core.hooksPath scripts/hooks
+
+LEAKS=$(git diff --cached -U0 --no-color -- . ':!scripts/hooks/pre-commit' | grep -E '^\+' | grep -v '^+++' \
+  | grep -inE -f .git/info/forbidden-patterns | head -5)
+if [ -n "$LEAKS" ]; then
+  echo "pre-commit: these added lines contain words that must not be committed:"
+  echo "$LEAKS"
+  echo "Remove those words and commit again."
+  exit 1
+fi
+
 if ! output=$(swift test 2>&1); then
   echo "$output" | grep -E "error|failed|XCTAssert" | head -30
   echo "pre-commit: tests failed, commit stopped."

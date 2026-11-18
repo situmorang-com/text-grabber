@@ -24,12 +24,16 @@ final class CaptureCorpusTests: XCTestCase {
         for image in images {
             let name = image.deletingPathExtension().lastPathComponent
             let cgImage = try XCTUnwrap(Recognizer.loadImages(from: image).first)
-            for (suffix, mode) in [("txt", LineMode.paragraphs), ("keep.txt", LineMode.keepLines)] {
+            let variants: [(String, LineMode, StructuredText.Format)] = [
+                ("txt", .paragraphs, .plain), ("keep.txt", .keepLines, .plain), ("md.txt", .paragraphs, .markdown),
+            ]
+            for (suffix, mode, format) in variants {
                 let expectedFile = folder.appendingPathComponent("\(name).\(suffix)")
                 guard let expected = try? String(contentsOf: expectedFile, encoding: .utf8) else { continue }
                 var options = RecognitionOptions()
                 options.lineMode = mode
-                let actual = try Recognizer.recognizeText(in: cgImage, options: options).text
+                let result = try Recognizer.readFragments(in: cgImage, options: options)
+                let actual = Recognizer.compose(result.fragments, structure: result.structure, options: options).render(format)
                 checked += 1
                 if knownGaps.contains(name) {
                     XCTExpectFailure("\(name) is a known gap") {
@@ -57,7 +61,7 @@ final class CaptureCorpusTests: XCTestCase {
         let outcome = ExactText.refine(lines: fragments.map(\.text), candidates: fragments.map { _ in [0] }, sources: [windowText])
         for index in fragments.indices { fragments[index].text = outcome.lines[index] }
 
-        XCTAssertEqual(Recognizer.compose(fragments, options: options), expected)
+        XCTAssertEqual(Recognizer.compose(fragments, options: options).render(), expected)
         XCTAssertGreaterThanOrEqual(outcome.replaced, 2)
     }
 

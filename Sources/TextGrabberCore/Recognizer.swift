@@ -21,6 +21,8 @@ public struct RecognitionOptions {
     public var forcedScale: CGFloat?
     /// Read uncertain lines a second time from an enlarged crop.
     public var retryUncertainLines = true
+    /// Group lines into paragraphs and table cells with Apple's document recognition (macOS 26 and later).
+    public var useDocumentStructure = true
 
     public init() {}
 
@@ -38,6 +40,8 @@ public struct RecognitionResult {
     /// "accurate" or "fast": which pass produced the text.
     public var pass: String
     public var upscaled: Bool
+    /// Paragraphs and tables, when document recognition was available and found any.
+    public var structure: DocumentStructure?
 }
 
 public enum RecognitionError: LocalizedError {
@@ -58,16 +62,42 @@ public enum Recognizer {
 
     public static func recognizeText(in image: CGImage, options: RecognitionOptions = .init()) throws -> RecognitionResult {
         var result = try readFragments(in: image, options: options)
-        result.text = compose(result.fragments, options: options)
+        result.text = compose(result.fragments, structure: result.structure, options: options).render()
         return result
     }
 
     /// Lays fragments out as text. Uses the system spelling dictionary, so call it on the main thread in an app.
-    public static func compose(_ fragments: [TextFragment], options: RecognitionOptions) -> String {
+    public static func compose(_ fragments: [TextFragment], structure: DocumentStructure? = nil, options: RecognitionOptions) -> StructuredText {
+        if let structure, options.useDocumentStructure, !structure.paragraphs.isEmpty || !structure.tables.isEmpty {
+            return DocumentLayout(mode: options.lineMode, isWord: Dictionary.isWord).compose(fragments, structure: structure)
+        }
         var engine = LayoutEngine(mode: options.lineMode, isWord: Dictionary.isWord)
         engine.detectColumns = options.detectColumns
         engine.detectTables = options.detectTables
-        return engine.compose(fragments)
+        return StructuredText(plain: engine.compose(fragments))
+    }
+
+    /// Paragraphs and table cells as Apple's document recognition sees them, or nil where it is not available.
+    public static func readStructure(in image: CGImage) -> DocumentStructure? {
+        guard #available(macOS 26.0, *) else { return nil }
+        let box: (NormalizedRect) -> CGRect = { rect in
+            let b = rect.cgRect
+            return CGRect(x: b.minX, y: 1 - b.maxY, width: b.width, height: b.height)
+        }
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var result: DocumentStructure?
+        Task.detached {
+            defer { done.signal() }
+            guard let observations = try? await RecognizeDocumentsRequest().perform(on: image, orientation: nil),
+                  let document = observations.first?.document else { return }
+            let tables = document.tables.map { table in
+                DocumentStructure.Table(box: box(table.boundingRegion.boundingBox),
+                                        cells: table.rows.map { row in row.map { box($0.content.boundingRegion.boundingBox) } })
+            }
+            result = DocumentStructure(paragraphs: document.paragraphs.map { box($0.boundingRegion.boundingBox) }, tables: tables)
+        }
+        // Structure is an improvement, never a requirement: give up rather than hold the capture.
+        return done.wait(timeout: .now() + 8) == .success ? result : nil
     }
 
     /// The Vision part only: safe to run off the main thread. `text` is left empty.
@@ -106,7 +136,8 @@ public enum Recognizer {
         if options.retryUncertainLines {
             fragments = retryUncertain(fragments, in: working, options: options)
         }
-        return RecognitionResult(text: "", fragments: fragments, pass: pass, upscaled: upscaled)
+        let structure = options.useDocumentStructure && !fragments.isEmpty ? readStructure(in: working) : nil
+        return RecognitionResult(text: "", fragments: fragments, pass: pass, upscaled: upscaled, structure: structure)
     }
 
     /// Vision marks a line it struggled with (small or faint text, sometimes read upside-down) with low confidence.
@@ -130,6 +161,7 @@ public enum Recognizer {
             if confidence > result[index].confidence {
                 result[index].text = lines.sorted { $0.box.minX < $1.box.minX }.map(\.text).joined(separator: " ")
                 result[index].confidence = confidence
+                result[index].wordBoxes = []
             }
         }
         return result
@@ -153,7 +185,15 @@ public enum Recognizer {
         try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
         return request.results?.compactMap { observation in
             guard let best = observation.topCandidates(1).first else { return nil }
-            return TextFragment(text: best.string, visionBox: observation.boundingBox, confidence: best.confidence)
+            var fragment = TextFragment(text: best.string, visionBox: observation.boundingBox, confidence: best.confidence)
+            // Word positions, so a line that runs across two table cells can be split between them.
+            var boxes: [CGRect] = []
+            for word in best.string.split(separator: " ", omittingEmptySubsequences: true) {
+                guard let box = try? best.boundingBox(for: word.startIndex..<word.endIndex)?.boundingBox else { boxes = []; break }
+                boxes.append(CGRect(x: box.minX, y: 1 - box.maxY, width: box.width, height: box.height))
+            }
+            fragment.wordBoxes = boxes
+            return fragment
         }
     }
 
@@ -176,6 +216,7 @@ public enum Recognizer {
         guard let image = rep.cgImage else { return }
         var options = RecognitionOptions()
         options.upscaleSmallImages = false
+        // Also loads the document-structure model, which takes the same long first run.
         _ = try? readFragments(in: image, options: options)
     }
 

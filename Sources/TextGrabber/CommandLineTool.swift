@@ -11,6 +11,9 @@ enum CommandLineTool {
       --no-upscale                    Do not enlarge small images first
       --scale <n>                     Enlarge by exactly n before reading (experiments)
       --no-retry                      Do not re-read uncertain lines from an enlarged crop
+      --no-structure                  Do not use Apple's document recognition for paragraphs and tables
+      --markdown                      Write Markdown (tables as Markdown tables)
+      --csv                           Write tables as CSV
       --debug                         Print each recognised fragment and its box to stderr
       --languages                     List supported languages
       --ax-at <x,y>                   Print the text the Accessibility API gives at a screen point (diagnostic)
@@ -20,6 +23,8 @@ enum CommandLineTool {
         var options = RecognitionOptions()
         var files: [String] = []
         var barcode = false, debug = false
+        var format = StructuredText.Format.plain
+        var tableStyle = StructuredText.TableStyle.tabs
         var iterator = arguments.makeIterator()
         while let argument = iterator.next() {
             switch argument {
@@ -36,6 +41,9 @@ enum CommandLineTool {
             case "--no-upscale": options.upscaleSmallImages = false
             case "--scale": options.forcedScale = Double(iterator.next() ?? "").map { CGFloat($0) }
             case "--no-retry": options.retryUncertainLines = false
+            case "--no-structure": options.useDocumentStructure = false
+            case "--markdown": format = .markdown
+            case "--csv": tableStyle = .csv
             case "--debug": debug = true
             case "--ax-at":
                 let parts = (iterator.next() ?? "").split(separator: ",").compactMap { Double($0) }
@@ -68,9 +76,15 @@ enum CommandLineTool {
                     if barcode {
                         outputs.append(contentsOf: try Recognizer.readBarcodes(in: image))
                     } else {
-                        let result = try Recognizer.recognizeText(in: image, options: options)
+                        var result = try Recognizer.readFragments(in: image, options: options)
+                        result.text = Recognizer.compose(result.fragments, structure: result.structure, options: options)
+                            .render(format, tables: tableStyle)
                         if debug {
-                            FileHandle.standardError.write(Data("pass=\(result.pass) upscaled=\(result.upscaled) fragments=\(result.fragments.count)\n".utf8))
+                            FileHandle.standardError.write(Data("pass=\(result.pass) upscaled=\(result.upscaled) fragments=\(result.fragments.count) structure=\(result.structure.map { "\($0.paragraphs.count) paragraphs, \($0.tables.count) tables" } ?? "none")\n".utf8))
+                            if let structure = result.structure {
+                                for p in structure.paragraphs { FileHandle.standardError.write(Data(String(format: "  paragraph [%.3f %.3f %.3f %.3f]\n", p.minX, p.minY, p.width, p.height).utf8)) }
+                                for t in structure.tables { FileHandle.standardError.write(Data(String(format: "  table [%.3f %.3f %.3f %.3f] %d rows\n", t.box.minX, t.box.minY, t.box.width, t.box.height, t.cells.count).utf8)) }
+                            }
                             for fragment in result.fragments {
                                 let box = fragment.box
                                 FileHandle.standardError.write(Data(String(format: "  [%.3f %.3f %.3f %.3f] conf %.2f  %@\n", box.minX, box.minY, box.width, box.height, fragment.confidence, fragment.text).utf8))

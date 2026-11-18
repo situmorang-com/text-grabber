@@ -177,6 +177,7 @@ final class CaptureController {
             case .text(let override):
                 let options = Prefs.recognitionOptions(lineMode: override)
                 var pages: [[TextFragment]] = []
+                var structures: [DocumentStructure?] = []
                 var failure: Error?
                 var exactLines = 0
                 var report = ""
@@ -184,8 +185,11 @@ final class CaptureController {
                     report += "image: \(image.width)×\(image.height) px, \(Self.looksBlank(image) ? "BLANK (one flat colour: the app may lack Screen Recording access)" : "has content")\n"
                 }
                 for image in images {
-                    do { pages.append(try Recognizer.readFragments(in: image, options: options).fragments) }
-                    catch { failure = error }
+                    do {
+                        let result = try Recognizer.readFragments(in: image, options: options)
+                        pages.append(result.fragments)
+                        structures.append(result.structure)
+                    } catch { failure = error }
                 }
                 // A screen capture of a real window: swap in the app's own text where it lines up (emoji, symbols).
                 if let screenRect, pages.count == 1, Prefs.bool(Prefs.Key.exactText) {
@@ -197,9 +201,13 @@ final class CaptureController {
                 DispatchQueue.main.async {
                     self.isBusy = false
                     // Layout uses the spelling dictionary, which belongs on the main thread.
-                    let text = pages.map { Recognizer.compose($0, options: options) }
-                        .filter { !$0.isEmpty }
-                        .joined(separator: "\n\n")
+                    let structured = StructuredText(zip(pages, structures).flatMap { page, structure in
+                        Recognizer.compose(page, structure: structure, options: options).blocks
+                    })
+                    let text = structured.render()
+                    if let structure = structures.first ?? nil {
+                        report += "document structure: \(structure.paragraphs.count) paragraphs, \(structure.tables.count) tables\n"
+                    }
                     if !report.isEmpty || probe {
                         report += "lines recognised: \(pages.reduce(0) { $0 + $1.count })\n"
                         AccessibilityText.writeLog(report + "\ntext delivered (\(options.lineMode.rawValue)):\n" + text + "\n")

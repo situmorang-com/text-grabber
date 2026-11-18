@@ -8,6 +8,11 @@ public struct TextFragment: Equatable {
     public var box: CGRect
     /// How sure recognition was, 0…1. Text that did not come from recognition is 1.
     public var confidence: Float = 1
+    /// Box of each space-separated word of `text`, when recognition provided them. Empty once `text` is changed.
+    public var wordBoxes: [CGRect] = []
+
+    /// The words of the text, as `wordBoxes` counts them.
+    public var words: [Substring] { text.split(separator: " ", omittingEmptySubsequences: true) }
 
     public init(_ text: String, _ box: CGRect) {
         self.text = text

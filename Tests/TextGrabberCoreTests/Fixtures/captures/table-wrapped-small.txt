@@ -1,0 +1,16 @@
+Plan comparison
+
+Plan	Price	What you get
+Basic	Free for everyone	Capture text from any part of the screen and copy it straight to the clipboard.
+Plus	About $10 for a personal licence	Everything in Basic, with tables, translation and a searchable history of captures.
+Team	Priced per seat	Shared settings and custom words for the whole team, managed from one place.
+
+Two things to check before release:
+
+• Run the full test suite on a clean machine
+• Update the changelog with every user-visible change
+
+1. Tag the build
+2. Ship it to the store and announce it
+
+The release notes go out on Monday. They describe the new capture modes, the faster recognition and the fixes for small text on external displays.

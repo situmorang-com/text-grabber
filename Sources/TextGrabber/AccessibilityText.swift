@@ -52,7 +52,7 @@ enum AccessibilityText {
         let outcome = ExactText.refine(lines: fragments.map(\.text), candidates: candidates, sources: collector.texts)
         var refined = fragments
         for index in refined.indices {
-            refined[index].text = outcome.lines[index]
+            if refined[index].text != outcome.lines[index] { refined[index].text = outcome.lines[index]; refined[index].wordBoxes = [] }
             let sources = candidates[index].map { "\"" + collector.texts[$0].prefix(90).replacingOccurrences(of: "\n", with: "⏎") + "\"" }
             report += "\nline \(index + 1) recognised: \"\(fragments[index].text)\"\n"
             report += "  app text here: \(sources.isEmpty ? "none" : sources.joined(separator: " | "))\n"

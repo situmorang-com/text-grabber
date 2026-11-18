@@ -11,6 +11,8 @@ A macOS menu bar app that copies text from anything on screen: select an area, a
 
 ## Reading windows and small text
 
+- On macOS 26 and later, Apple's document recognition decides what belongs together: paragraphs, list items and table cells, including cells whose text wraps over several lines. The words themselves still come from TextGrabber's own recognition, so enlargement, retries and exact text from apps all still apply. Where it is unavailable, TextGrabber's own layout rules take over.
+
 - A sidebar beside its content, or any panes whose lines do not line up with each other, are read one after the other. Columns of a table or grid, whose rows do line up, stay together.
 - Small text is enlarged before reading, based on the height of the letters. This matters most on non-Retina displays.
 - A line recognition was unsure about is read a second time from an enlarged crop; this catches small text that would otherwise come back upside-down.
@@ -60,6 +62,8 @@ The same binary reads files when given arguments:
 |---|---|
 | `Sources/TextGrabberCore/LayoutEngine.swift` | Turns OCR fragments into text: reading order, columns, tables, paragraphs, hyphenation |
 | `Sources/TextGrabberCore/Recognizer.swift` | Vision text and barcode recognition, image upscaling, PDF pages |
+| `Sources/TextGrabberCore/DocumentLayout.swift` | Lays recognised lines out with Apple's paragraph and table structure |
+| `Sources/TextGrabberCore/StructuredText.swift` | Text as blocks and tables; writes plain text, Markdown, CSV |
 | `Sources/TextGrabberCore/ExactText.swift` | Matches recognised lines against an app's real text to restore emoji and symbols |
 | `Sources/TextGrabber/` | The menu bar app: capture, shortcuts, clipboard, HUD, history, settings, CLI |
 | `Tests/TextGrabberCoreTests/` | Layout engine tests |

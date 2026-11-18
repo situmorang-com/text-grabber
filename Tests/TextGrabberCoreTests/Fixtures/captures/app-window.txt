@@ -1,0 +1,21 @@
+Account
+Usage
+Appearance
+Capabilities
+Notifications
+Privacy
+Shortcuts
+
+Features
+
+Easy to learn
+One hotkey to start capturing text from anywhere on screen. Press it again to cancel.
+
+Fast and efficient
+Recognition runs on your Mac in well under a second, even on large windows.
+
+Depth of features
+From clipboard history to tables, every part is built to be as good as a standalone tool.
+
+Private by design
+Nothing leaves your Mac. No accounts, no telemetry, no uploads of any kind.

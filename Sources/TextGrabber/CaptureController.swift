@@ -50,6 +50,7 @@ final class CaptureController {
                 guard let self else { return }
                 guard let data, let image = ImagePrep.image(from: data) else {
                     self.isBusy = false   // Esc pressed: nothing to do
+                    self.output.cancelPending()
                     return
                 }
                 if let probeRect {
@@ -204,7 +205,7 @@ final class CaptureController {
                     let structured = StructuredText(zip(pages, structures).flatMap { page, structure in
                         Recognizer.compose(page, structure: structure, options: options).blocks
                     })
-                    let text = structured.render()
+                    let text = structured.render(OutputFormat.format, tables: OutputFormat.tableStyle)
                     if let structure = structures.first ?? nil {
                         report += "document structure: \(structure.paragraphs.count) paragraphs, \(structure.tables.count) tables\n"
                     }
@@ -216,7 +217,8 @@ final class CaptureController {
                     if text.isEmpty, let failure {
                         self.output.fail("Text recognition failed", detail: failure.localizedDescription)
                     } else {
-                        self.output.deliver(text, kind: .text, note: exactLines > 0 ? "exact text from the app" : self.accessHint(screenRect))
+                        self.output.deliver(text, kind: .text, note: exactLines > 0 ? "exact text from the app" : self.accessHint(screenRect),
+                                            result: CaptureResult(pages: pages, structures: structures, options: options, kind: .text))
                     }
                 }
             }

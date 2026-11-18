@@ -17,6 +17,16 @@ A macOS menu bar app that copies text from anything on screen: select an area, a
 - Small text is enlarged before reading, based on the height of the letters. This matters most on non-Retina displays.
 - A line recognition was unsure about is read a second time from an enlarged crop; this catches small text that would otherwise come back upside-down.
 
+## The editor
+
+"Capture and Edit…" (menu, or a shortcut you set) opens the result in an editor instead of only copying it; Settings can make that the default. "Edit Last Capture…" reopens the last one, and history entries have an Edit button. In the editor you can:
+
+- edit the text, switch line breaks (smart, keep, single line) and format (plain text or Markdown; tables as tabs, CSV or Markdown);
+- **translate** it with Apple's on-device translation (macOS 15+), keeping lines and table columns;
+- **clean up** recognition mistakes with Apple's on-device model (macOS 26+, Apple Intelligence on). A reply that changes too many words is refused. Check the result: the model can guess wrong.
+
+Nothing leaves the Mac for either.
+
 ## Emoji and symbols
 
 Apple's text recognition cannot read emoji or symbols such as ⌘ and ⇧. When the area you capture is a real app window, TextGrabber reads that window's own text through the Accessibility API and uses it for every line it can match, so those characters come out right. The confirmation says "exact text from the app" when this happened.
@@ -46,6 +56,24 @@ The first run in a fresh build can take about a minute while macOS prepares the 
 
 Tests run before every commit. On a fresh clone, turn that on with `git config core.hooksPath scripts/hooks`.
 
+## Automation
+
+URL actions, for Shortcuts ("Open URL"), Raycast, Alfred or scripts:
+
+| URL | Does |
+|---|---|
+| `textgrabber://capture` | Capture text |
+| `textgrabber://capture-edit` | Capture text and open the editor |
+| `textgrabber://capture-last-area` | Capture the last area again |
+| `textgrabber://capture-keep-lines` | Capture text, keeping line breaks |
+| `textgrabber://read-code` | Read a QR code or barcode |
+| `textgrabber://clipboard` | Read the image on the clipboard |
+| `textgrabber://open?path=/abs/file.png` | Read files (repeat `path` for several) |
+| `textgrabber://edit-last` | Reopen the last capture in the editor |
+| `textgrabber://history`, `textgrabber://settings` | Open those windows |
+
+Add `edit=1` to any capture action to open the editor for that capture.
+
 ## Command line
 
 The same binary reads files when given arguments:
@@ -53,6 +81,7 @@ The same binary reads files when given arguments:
 ```sh
 /Applications/TextGrabber.app/Contents/MacOS/TextGrabber --mode paragraphs scan.png
 /Applications/TextGrabber.app/Contents/MacOS/TextGrabber --barcode ticket.png
+/Applications/TextGrabber.app/Contents/MacOS/TextGrabber --markdown --translate id table.png
 /Applications/TextGrabber.app/Contents/MacOS/TextGrabber --help
 ```
 

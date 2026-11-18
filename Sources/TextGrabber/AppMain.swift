@@ -53,18 +53,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for url in urls where url.scheme == "textgrabber" { handle(url) }
     }
 
-    /// textgrabber://capture        the same as the capture shortcut
-    /// textgrabber://probe?rect=x,y,w,h   read that area and write ~/Library/Logs/TextGrabber/last-capture.txt only
+    /// URL actions, for Shortcuts, Raycast, Alfred and scripts. See the README for the list.
     private func handle(_ url: URL) {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let value = { (name: String) in query.first { $0.name == name }?.value }
+        if value("edit") == "1" || value("edit") == "true" { output.editNext = true }
         switch url.host {
-        case "capture":
-            capture.captureScreen(.text(nil))
+        case "capture": perform(.captureText)
+        case "capture-edit": perform(.captureAndEdit)
+        case "capture-last-area": perform(.captureLastArea)
+        case "capture-keep-lines": perform(.captureKeepLines)
+        case "read-code": perform(.captureBarcode)
+        case "clipboard": perform(.clipboardImage)
+        case "edit-last": editLast()
+        case "stop-speaking": perform(.stopSpeaking)
+        case "open":
+            // textgrabber://open?path=/absolute/file.png (repeat path for several files)
+            let files = query.filter { $0.name == "path" }.compactMap(\.value).map { URL(fileURLWithPath: $0) }
+            if !files.isEmpty { capture.recogniseFiles(files) }
+        case "settings": showSettings()
+        case "history": showHistory()
         case "probe":
-            guard let rect = query.first(where: { $0.name == "rect" })?.value, CaptureController.rect(from: rect) != nil else { return }
+            guard let rect = value("rect"), CaptureController.rect(from: rect) != nil else { return }
             capture.captureScreen(.text(nil), probeRect: rect)
         default:
-            break
+            output.editNext = false
         }
     }
 
@@ -73,6 +86,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .captureText: capture.captureScreen(.text(nil))
         case .captureLastArea: capture.captureScreen(.text(nil), lastArea: true)
         case .captureKeepLines: capture.captureScreen(.text(.keepLines))
+        case .captureAndEdit:
+            output.editNext = true
+            capture.captureScreen(.text(nil))
         case .captureBarcode: capture.captureScreen(.barcode)
         case .clipboardImage: capture.recogniseClipboard()
         case .stopSpeaking: output.stopSpeaking()
@@ -98,6 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Capture Last Area Again", #selector(captureLast), shortcut: .captureLastArea).isEnabled = Prefs.lastRect != nil
         add("Read QR Code or Barcode", #selector(captureBarcode), shortcut: .captureBarcode)
         add("Recognise Image on Clipboard", #selector(clipboardImage), shortcut: .clipboardImage)
+        add("Capture and Edit…", #selector(captureAndEdit), shortcut: .captureAndEdit)
+        add("Edit Last Capture…", #selector(editLast)).isEnabled = output.lastResult != nil
         add("Open Image or PDF…", #selector(openFiles))
         menu.addItem(.separator())
 
@@ -162,6 +180,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func captureBarcode() { afterMenuCloses { self.capture.captureScreen(.barcode) } }
     @objc private func clipboardImage() { capture.recogniseClipboard() }
     @objc private func openFiles() { capture.chooseFiles() }
+    @objc private func captureAndEdit() { afterMenuCloses { self.perform(.captureAndEdit) } }
+    @objc private func editLast() { if let last = output.lastResult { output.editor.show(last) } }
     @objc private func stopSpeaking() { output.stopSpeaking() }
     @objc private func quit() { NSApp.terminate(nil) }
 
@@ -207,6 +227,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let view = HistoryView(store: output.history) { [weak self] text in
                 self?.output.write(text)
                 self?.output.notify(symbol: "doc.on.clipboard", title: "Copied again")
+            } edit: { [weak self] entry in
+                self?.output.editor.show(.fixed(entry.text, kind: entry.kind))
             }
             historyWindow = makeWindow(title: "Capture History", size: NSSize(width: 560, height: 520), content: view,
                                        resizable: true)

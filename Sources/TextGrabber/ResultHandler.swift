@@ -13,11 +13,23 @@ final class ResultHandler {
     private let hud = HUD()
     private let synthesizer = AVSpeechSynthesizer()
     private var progressTimer: Timer?
+    private(set) lazy var editor = ResultPanelController(output: self)
+    /// The most recent capture, for "Edit Last Capture".
+    private(set) var lastResult: CaptureResult?
+    /// Open the editor for the next capture only ("Capture and Edit").
+    var editNext = false
 
     var isSpeaking: Bool { synthesizer.isSpeaking }
 
-    func deliver(_ text: String, kind: ResultKind, note: String? = nil) {
+    func cancelPending() {
+        editNext = false
         cancelProgress()
+    }
+
+    func deliver(_ text: String, kind: ResultKind, note: String? = nil, result: CaptureResult? = nil) {
+        cancelProgress()
+        let openEditor = editNext || Prefs.bool(Prefs.Key.openEditor)
+        editNext = false
         guard !text.isEmpty else {
             hud.show(symbol: kind == .barcode ? "qrcode.viewfinder" : "text.magnifyingglass",
                      title: kind == .barcode ? "No code found" : "No text found", detail: nil)
@@ -28,6 +40,11 @@ final class ResultHandler {
 
         copy(text)
         if Prefs.bool(Prefs.Key.keepHistory) { history.add(text, kind: kind) }
+        lastResult = result ?? .fixed(text, kind: kind)
+        if openEditor, let lastResult {
+            editor.show(lastResult)
+            return
+        }
 
         let words = text.split(whereSeparator: \.isWhitespace).count
         let additive = Prefs.bool(Prefs.Key.additive)

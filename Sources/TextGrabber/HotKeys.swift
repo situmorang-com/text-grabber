@@ -3,7 +3,7 @@ import Carbon.HIToolbox
 
 /// The things a global shortcut can trigger.
 enum HotKeyAction: String, CaseIterable, Identifiable {
-    case captureText, captureLastArea, captureKeepLines, captureBarcode, clipboardImage, stopSpeaking
+    case captureText, captureAndEdit, captureLastArea, captureKeepLines, captureBarcode, clipboardImage, stopSpeaking
 
     var id: String { rawValue }
 
@@ -12,6 +12,7 @@ enum HotKeyAction: String, CaseIterable, Identifiable {
         case .captureText: return "Capture text"
         case .captureLastArea: return "Capture the last area again"
         case .captureKeepLines: return "Capture text, keeping line breaks"
+        case .captureAndEdit: return "Capture text and open the editor"
         case .captureBarcode: return "Read QR code or barcode"
         case .clipboardImage: return "Recognise image on the clipboard"
         case .stopSpeaking: return "Stop speaking"

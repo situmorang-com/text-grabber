@@ -12,6 +12,14 @@ BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/TextGr
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/TextGrabber"
+# SwiftPM records the deployment target (14.0) as the SDK version. macOS then treats the app as built for
+# macOS 14 and withholds newer behaviour: measured, Translation reports every language as "not installed".
+# Stamp the real SDK version, keeping the deployment target.
+SDK_VERSION="$(xcrun --show-sdk-version)"
+for ARCH in $(lipo -archs "$APP/Contents/MacOS/TextGrabber"); do
+  xcrun vtool -arch "$ARCH" -set-build-version macos 14.0 "$SDK_VERSION" -replace \
+    -output "$APP/Contents/MacOS/TextGrabber" "$APP/Contents/MacOS/TextGrabber" 2>/dev/null
+done
 
 # Icon
 ICONSET="build/AppIcon.iconset"

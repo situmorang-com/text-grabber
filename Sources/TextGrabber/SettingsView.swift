@@ -23,6 +23,7 @@ private struct GeneralSettings: View {
     @AppStorage(Prefs.Key.additive) private var additive = false
     @AppStorage(Prefs.Key.speak) private var speak = false
     @AppStorage(Prefs.Key.speechRate) private var speechRate = 0.5
+    @AppStorage(Prefs.Key.openEditor) private var openEditor = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
 
@@ -43,6 +44,7 @@ private struct GeneralSettings: View {
                 }
             }
             Section("After a capture") {
+                Toggle("Open the editor (edit, translate, clean up) instead of only copying", isOn: $openEditor)
                 Toggle("Show a confirmation with a preview", isOn: $showHUD)
                 Toggle("Keep a history of captures on this Mac", isOn: $keepHistory)
                 Toggle("Open the link when the capture is a single link", isOn: $openLinks)
@@ -70,6 +72,8 @@ private struct RecognitionSettings: View {
     @AppStorage(Prefs.Key.detectColumns) private var detectColumns = true
     @AppStorage(Prefs.Key.detectTables) private var detectTables = true
     @AppStorage(Prefs.Key.exactText) private var exactText = true
+    @AppStorage(Prefs.Key.outputFormat) private var outputFormat = StructuredText.Format.plain.rawValue
+    @AppStorage(Prefs.Key.tableStyle) private var tableStyle = StructuredText.TableStyle.tabs.rawValue
     @State private var accessibilityGranted = AccessibilityText.isTrusted
     private let accessCheck = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
     private let languages = Recognizer.supportedLanguages()
@@ -83,7 +87,18 @@ private struct RecognitionSettings: View {
                     Text("Single line").tag(LineMode.singleLine.rawValue)
                 }
                 Toggle("Read side-by-side columns one after the other", isOn: $detectColumns)
-                Toggle("Copy tables with tabs, ready for a spreadsheet", isOn: $detectTables)
+                Toggle("Recognise tables", isOn: $detectTables)
+                Picker("Copy as", selection: $outputFormat) {
+                    Text("Plain text").tag(StructuredText.Format.plain.rawValue)
+                    Text("Markdown").tag(StructuredText.Format.markdown.rawValue)
+                }
+                if outputFormat == StructuredText.Format.plain.rawValue {
+                    Picker("Tables in plain text", selection: $tableStyle) {
+                        Text("Tabs (paste into a spreadsheet)").tag(StructuredText.TableStyle.tabs.rawValue)
+                        Text("CSV").tag(StructuredText.TableStyle.csv.rawValue)
+                        Text("Markdown").tag(StructuredText.TableStyle.markdown.rawValue)
+                    }
+                }
             }
             Section("Language") {
                 Picker("Main language", selection: $language) {
@@ -217,6 +232,7 @@ private struct ShortcutRecorder: View {
 struct HistoryView: View {
     @ObservedObject var store: HistoryStore
     var copy: (String) -> Void
+    var edit: (HistoryEntry) -> Void = { _ in }
     @State private var query = ""
 
     private var matches: [HistoryEntry] {
@@ -237,6 +253,7 @@ struct HistoryView: View {
                             Text(entry.date.formatted(date: .abbreviated, time: .shortened))
                             if entry.kind == .barcode { Text("· QR or barcode") }
                             Spacer()
+                            Button("Edit") { edit(entry) }
                             Button("Copy") { copy(entry.text) }
                             Button("Delete", role: .destructive) { store.remove(entry) }
                         }

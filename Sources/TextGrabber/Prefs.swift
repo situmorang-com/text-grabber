@@ -21,6 +21,10 @@ enum Prefs {
         static let keepHistory = "keepHistory"
         static let lastRect = "lastCaptureRect"
         static let exactText = "useExactTextFromApps"
+        static let outputFormat = "outputFormat"
+        static let tableStyle = "tableStyle"
+        static let translationTarget = "translationTarget"
+        static let openEditor = "openEditorAfterCapture"
     }
 
     static let defaults = UserDefaults.standard
@@ -43,6 +47,9 @@ enum Prefs {
             Key.showHUD: true,
             Key.keepHistory: true,
             Key.exactText: true,
+            Key.outputFormat: StructuredText.Format.plain.rawValue,
+            Key.tableStyle: StructuredText.TableStyle.tabs.rawValue,
+            Key.openEditor: false,
         ])
     }
 

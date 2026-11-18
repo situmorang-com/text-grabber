@@ -6,5 +6,8 @@ let arguments = Array(CommandLine.arguments.dropFirst()).filter { !$0.hasPrefix(
 if arguments.isEmpty || arguments == ["YES"] || arguments == ["NO"] {
     AppMain.run()
 } else {
-    exit(CommandLineTool.run(arguments))
+    // Run asynchronously on a live main queue: Apple's translation reports "not installed" when it is
+    // driven from a thread that is blocked waiting for it.
+    Task.detached { exit(await CommandLineTool.run(arguments)) }
+    dispatchMain()
 }

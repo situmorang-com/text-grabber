@@ -1,4 +1,6 @@
 import Foundation
+import Translation
+import NaturalLanguage
 import TextGrabberCore
 
 enum CommandLineTool {
@@ -14,16 +16,20 @@ enum CommandLineTool {
       --no-structure                  Do not use Apple's document recognition for paragraphs and tables
       --markdown                      Write Markdown (tables as Markdown tables)
       --csv                           Write tables as CSV
+      --translate <code>              Translate the result on this Mac, e.g. --translate id
+      --clean-up                      Fix recognition mistakes with Apple's on-device model
       --debug                         Print each recognised fragment and its box to stderr
       --languages                     List supported languages
       --ax-at <x,y>                   Print the text the Accessibility API gives at a screen point (diagnostic)
     """
 
-    static func run(_ arguments: [String]) -> Int32 {
+    static func run(_ arguments: [String]) async -> Int32 {
         var options = RecognitionOptions()
         var files: [String] = []
         var barcode = false, debug = false
         var format = StructuredText.Format.plain
+        var translateTo: String?
+        var cleanUp = false
         var tableStyle = StructuredText.TableStyle.tabs
         var iterator = arguments.makeIterator()
         while let argument = iterator.next() {
@@ -44,6 +50,8 @@ enum CommandLineTool {
             case "--no-structure": options.useDocumentStructure = false
             case "--markdown": format = .markdown
             case "--csv": tableStyle = .csv
+            case "--translate": translateTo = iterator.next()
+            case "--clean-up": cleanUp = true
             case "--debug": debug = true
             case "--ax-at":
                 let parts = (iterator.next() ?? "").split(separator: ",").compactMap { Double($0) }
@@ -97,7 +105,31 @@ enum CommandLineTool {
                 return fail("\(file): \(error.localizedDescription)")
             }
         }
-        print(outputs.joined(separator: "\n\n"))
+        var text = outputs.joined(separator: "\n\n")
+        if cleanUp {
+            guard #available(macOS 26.0, *) else { return fail("--clean-up needs macOS 26") }
+            do { text = try await TextCleaner.clean(text) } catch {
+                FileHandle.standardError.write(Data("Clean-up failed: \(error.localizedDescription)\n".utf8))
+            }
+        }
+        if let translateTo {
+            guard #available(macOS 26.0, *) else { return fail("--translate needs macOS 26") }
+            let source = NLLanguageRecognizer.dominantLanguage(for: text)?.rawValue ?? "en"
+            if debug { FileHandle.standardError.write(Data("translating from \(source)\n".utf8)) }
+            let translated: String
+            let input = text
+            do {
+                // Translation sessions work only from the main actor (measured: elsewhere they fail as "not installed").
+                translated = try await Task { @MainActor in
+                    let session = TranslationSession(installedSource: Locale.Language(identifier: source), target: Locale.Language(identifier: translateTo))
+                    return try await Translator.translate(input, with: session)
+                }.value
+            } catch {
+                return fail("Translation failed (\(error.localizedDescription)). Is that language pair downloaded? System Settings → General → Language & Region → Translation Languages.")
+            }
+            text = translated
+        }
+        print(text)
         return outputs.isEmpty ? 2 : 0
     }
 

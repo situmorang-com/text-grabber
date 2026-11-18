@@ -9,6 +9,8 @@ enum CommandLineTool {
       --words "a, b c"                Custom words, comma-separated
       --barcode                       Read QR codes and barcodes instead of text
       --no-upscale                    Do not enlarge small images first
+      --scale <n>                     Enlarge by exactly n before reading (experiments)
+      --no-retry                      Do not re-read uncertain lines from an enlarged crop
       --debug                         Print each recognised fragment and its box to stderr
       --languages                     List supported languages
       --ax-at <x,y>                   Print the text the Accessibility API gives at a screen point (diagnostic)
@@ -32,6 +34,8 @@ enum CommandLineTool {
             case "--words": options.customWords = RecognitionOptions.parseCustomWords(iterator.next() ?? "")
             case "--barcode": barcode = true
             case "--no-upscale": options.upscaleSmallImages = false
+            case "--scale": options.forcedScale = Double(iterator.next() ?? "").map { CGFloat($0) }
+            case "--no-retry": options.retryUncertainLines = false
             case "--debug": debug = true
             case "--ax-at":
                 let parts = (iterator.next() ?? "").split(separator: ",").compactMap { Double($0) }
@@ -69,7 +73,7 @@ enum CommandLineTool {
                             FileHandle.standardError.write(Data("pass=\(result.pass) upscaled=\(result.upscaled) fragments=\(result.fragments.count)\n".utf8))
                             for fragment in result.fragments {
                                 let box = fragment.box
-                                FileHandle.standardError.write(Data(String(format: "  [%.3f %.3f %.3f %.3f] %@\n", box.minX, box.minY, box.width, box.height, fragment.text).utf8))
+                                FileHandle.standardError.write(Data(String(format: "  [%.3f %.3f %.3f %.3f] conf %.2f  %@\n", box.minX, box.minY, box.width, box.height, fragment.confidence, fragment.text).utf8))
                             }
                         }
                         if !result.text.isEmpty { outputs.append(result.text) }

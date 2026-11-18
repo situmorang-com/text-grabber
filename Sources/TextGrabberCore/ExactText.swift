@@ -80,8 +80,27 @@ public enum ExactText {
                 .replacingOccurrences(of: "\n", with: " ")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             // Leave the line alone when the only difference is spacing: OCR is right about what is visible.
-            if skeleton(exact) == skeleton(split[index].body) { continue }
-            output[index] = split[index].marker + exact
+            // The app's text can be incomplete (a nested piece it did not report). Never trade recognised
+            // words for nothing: if the swap would lose more than a few letters or digits, keep what OCR saw.
+            let seen = split[index].body.filter { $0.isLetter || $0.isNumber }.count
+            let offered = exact.filter { $0.isLetter || $0.isNumber }.count
+            if seen - offered > max(4, seen / 10) { continue }
+
+            // A bullet the app does not have is an icon that OCR mistook for one: drop it.
+            // Numbers are kept either way; apps often draw them without putting them in their text.
+            var marker = split[index].marker
+            let isBullet = marker.first.map { !$0.isNumber && $0 != "(" } ?? false
+            let characters = sourceCharacters[match.source]
+            var before = match.range.lowerBound - 1
+            while before >= 0, characters[before] == " " { before -= 1 }
+            let sourceHasBullet = before >= 0 && "•◦▪‣*–-·".contains(characters[before])
+            if isBullet, !sourceHasBullet { marker = "" }
+            // And the other way round: a bullet OCR missed, when the app's text begins this item with one.
+            if marker.isEmpty, sourceHasBullet, before == 0 || characters[before - 1] == "\n" {
+                marker = String(characters[before]) + " "
+            }
+            if skeleton(exact) == skeleton(split[index].body) && marker == split[index].marker { continue }
+            output[index] = marker + exact
             replaced += 1
         }
         return Outcome(lines: output, replaced: replaced)

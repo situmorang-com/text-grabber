@@ -108,18 +108,20 @@ enum AccessibilityText {
             prepareApp(of: element)
 
             var found: [Int] = []
-            if let own = Self.text(of: element) { found.append(store(own)) }
+            // A list item's bullet or number is its own element; put it back in front of the item's text.
+            let marker = Self.listMarker(for: element) ?? ""
+            if let own = Self.text(of: element) { found.append(store(marker + own)) }
             // A sentence is often split into runs (plain text, a link, an emoji image): read the siblings together.
             if let parent: AXUIElement = Self.attribute(element, kAXParentAttribute),
                let children: [AXUIElement] = Self.attribute(parent, kAXChildrenAttribute), children.count > 1, children.count <= 200 {
                 var joined = ""
                 for child in children {
-                    guard let piece = Self.text(of: child), !piece.isEmpty else { continue }
+                    guard let piece = Self.deepText(of: child, depth: 0), !piece.isEmpty else { continue }
                     let needsSpace = !joined.isEmpty && !(joined.last?.isWhitespace ?? true) && !(piece.first?.isWhitespace ?? true)
                     joined += (needsSpace ? " " : "") + piece
                     if joined.count > ExactText.maxSourceLength { break }
                 }
-                if !joined.isEmpty { found.append(store(joined)) }
+                if !joined.isEmpty { found.append(store(joined.hasPrefix(marker.trimmingCharacters(in: .whitespaces)) ? joined : marker + joined)) }
             }
             seen[element] = found
             return found
@@ -140,6 +142,29 @@ enum AccessibilityText {
             appNames.insert(NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)")
             let app = AXUIElementCreateApplication(pid)
             AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        }
+
+        /// An element's text, or when it has none of its own (inline code, bold, a link), its descendants' text in order.
+        static func deepText(of element: AXUIElement, depth: Int) -> String? {
+            if let own = text(of: element) { return own }
+            guard depth < 3, let children: [AXUIElement] = attribute(element, kAXChildrenAttribute), !children.isEmpty, children.count <= 40 else { return nil }
+            let pieces = children.compactMap { deepText(of: $0, depth: depth + 1) }
+            return pieces.isEmpty ? nil : pieces.joined()
+        }
+
+        /// The marker ("• ", "1. ") of the list item this element sits in, if any.
+        static func listMarker(for element: AXUIElement) -> String? {
+            var current = element
+            for _ in 0..<4 {
+                guard let parent: AXUIElement = attribute(current, kAXParentAttribute) else { return nil }
+                if let children: [AXUIElement] = attribute(parent, kAXChildrenAttribute), let first = children.first,
+                   let role: String = attribute(first, kAXRoleAttribute), role == "AXListMarker" {
+                    guard let text = text(of: first), !text.isEmpty else { return nil }
+                    return text.hasSuffix(" ") ? text : text + " "
+                }
+                current = parent
+            }
+            return nil
         }
 
         /// The text an element shows: its value, or failing that its title or description.

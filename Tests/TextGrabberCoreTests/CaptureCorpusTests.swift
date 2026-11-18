@@ -61,10 +61,42 @@ final class CaptureCorpusTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(outcome.replaced, 2)
     }
 
+    /// Small text is sometimes read upside-down, with low confidence. Re-reading the line from an enlarged crop fixes it.
+    func testUncertainLinesAreReadAgainFromAnEnlargedCrop() throws {
+        let image = try XCTUnwrap(Recognizer.loadImages(from: folder.appendingPathComponent("small.png")).first)
+        var options = RecognitionOptions()
+        options.upscaleSmallImages = false     // leave only the retry to rescue it
+        options.retryUncertainLines = false
+        let before = try Recognizer.readFragments(in: image, options: options).fragments
+        XCTAssertTrue(before.contains { $0.confidence <= 0.5 }, "this image no longer produces an uncertain line")
+
+        options.retryUncertainLines = true
+        let after = try Recognizer.recognizeText(in: image, options: options)
+        XCTAssertTrue(after.text.contains("INV-20418"), after.text)
+        XCTAssertTrue(after.text.contains("QX7-R2"), after.text)
+        XCTAssertFalse(after.fragments.contains { $0.confidence <= 0.5 })
+    }
+
+    func testEnlargementDependsOnLetterHeightNotImageSize() {
+        // A big 1x window capture with 13 px lines: enlarge 3x. (Measured: 10 → 18 of 25 phrases read exactly.)
+        XCTAssertEqual(ImagePrep.scaleForSmallText(lineHeights: [12, 13, 13, 14, 30], imageWidth: 2924, imageHeight: 1296), 3)
+        // A Retina capture: lines are already tall.
+        XCTAssertNil(ImagePrep.scaleForSmallText(lineHeights: [26, 28, 31], imageWidth: 2404, imageHeight: 1144))
+        // Tiny letters, capped so the enlarged image stays a workable size.
+        XCTAssertEqual(ImagePrep.scaleForSmallText(lineHeights: [6, 7, 7], imageWidth: 700, imageHeight: 300), 4)
+        XCTAssertEqual(ImagePrep.scaleForSmallText(lineHeights: [7, 7], imageWidth: 5000, imageHeight: 1000), 2)
+        XCTAssertNil(ImagePrep.scaleForSmallText(lineHeights: [], imageWidth: 3000, imageHeight: 2000))
+        // Small captures are enlarged before the first pass: isolated characters go missing otherwise.
+        XCTAssertEqual(ImagePrep.initialScale(width: 330, height: 60), 3)
+        XCTAssertEqual(ImagePrep.initialScale(width: 920, height: 300), 2)
+        XCTAssertEqual(ImagePrep.initialScale(width: 2924, height: 1296), 1)
+    }
+
     func testSmallTextNeedsUpscaling() throws {
         let image = try XCTUnwrap(Recognizer.loadImages(from: folder.appendingPathComponent("small.png")).first)
         var options = RecognitionOptions()
         options.upscaleSmallImages = false
+        options.retryUncertainLines = false
         let plain = try Recognizer.recognizeText(in: image, options: options).text
         options.upscaleSmallImages = true
         let upscaled = try Recognizer.recognizeText(in: image, options: options).text

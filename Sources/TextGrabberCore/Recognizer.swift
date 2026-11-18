@@ -17,6 +17,10 @@ public struct RecognitionOptions {
     public var upscaleSmallImages = true
     public var detectColumns = true
     public var detectTables = true
+    /// For experiments: enlarge by exactly this factor instead of deciding from the image size.
+    public var forcedScale: CGFloat?
+    /// Read uncertain lines a second time from an enlarged crop.
+    public var retryUncertainLines = true
 
     public init() {}
 
@@ -70,20 +74,65 @@ public enum Recognizer {
     public static func readFragments(in image: CGImage, options: RecognitionOptions = .init()) throws -> RecognitionResult {
         var working = image
         var upscaled = false
-        if options.upscaleSmallImages, let larger = ImagePrep.upscaledIfSmall(image) {
-            working = larger
-            upscaled = true
+        // A small capture is enlarged before the first pass: at its own size, isolated characters go missing.
+        var appliedScale = options.forcedScale ?? (options.upscaleSmallImages ? ImagePrep.initialScale(width: image.width, height: image.height) : 1)
+        if appliedScale != 1, let scaled = ImagePrep.scaled(image, by: appliedScale) {
+            working = scaled
+            upscaled = appliedScale > 1
+        } else {
+            appliedScale = 1
         }
 
         var pass = "accurate"
         var fragments = try fragmentsOrNil(in: working, level: .accurate, options: options) ?? []
+
+        // Small text reads much better enlarged. What matters is the height of the letters, not the size of
+        // the image: on a real 1x window capture with 13 px lines, exact phrases went from 10 of 25 to 18 of 25 at 3x.
+        if options.forcedScale == nil, options.upscaleSmallImages,
+           let extra = ImagePrep.scaleForSmallText(lineHeights: fragments.map { $0.box.height * CGFloat(working.height) },
+                                                   imageWidth: working.width, imageHeight: working.height),
+           let larger = ImagePrep.scaled(image, by: appliedScale * extra),
+           let again = try? fragmentsOrNil(in: larger, level: .accurate, options: options), !again.isEmpty {
+            working = larger
+            fragments = again
+            upscaled = true
+        }
         if fragments.isEmpty {
             // Second chance: the fast model sometimes reads what the accurate one rejects (and survives its failures).
             pass = "fast"
             fragments = (try? fragmentsOrNil(in: working, level: .fast, options: options)) ?? []
         }
 
+        if options.retryUncertainLines {
+            fragments = retryUncertain(fragments, in: working, options: options)
+        }
         return RecognitionResult(text: "", fragments: fragments, pass: pass, upscaled: upscaled)
+    }
+
+    /// Vision marks a line it struggled with (small or faint text, sometimes read upside-down) with low confidence.
+    /// Such a line usually reads correctly on its own, enlarged; keep whichever reading Vision trusts more.
+    static func retryUncertain(_ fragments: [TextFragment], in image: CGImage, options: RecognitionOptions) -> [TextFragment] {
+        var result = fragments
+        var retries = 0
+        for index in result.indices where result[index].confidence <= 0.5 && retries < 12 {
+            retries += 1
+            let box = result[index].box
+            let width = CGFloat(image.width), height = CGFloat(image.height)
+            let pad = box.height * height * 0.35
+            let crop = CGRect(x: box.minX * width - pad, y: box.minY * height - pad,
+                              width: box.width * width + pad * 2, height: box.height * height + pad * 2)
+                .intersection(CGRect(x: 0, y: 0, width: width, height: height)).integral
+            guard crop.height >= 4, let cropped = image.cropping(to: crop) else { continue }
+            let scale = min(max(96 / crop.height, 2), 6)
+            guard let enlarged = ImagePrep.scaled(cropped, by: scale),
+                  let lines = try? fragmentsOrNil(in: enlarged, level: .accurate, options: options), !lines.isEmpty else { continue }
+            let confidence = lines.map(\.confidence).min() ?? 0
+            if confidence > result[index].confidence {
+                result[index].text = lines.sorted { $0.box.minX < $1.box.minX }.map(\.text).joined(separator: " ")
+                result[index].confidence = confidence
+            }
+        }
+        return result
     }
 
     private static func fragmentsOrNil(in image: CGImage, level: VNRequestTextRecognitionLevel, options: RecognitionOptions) throws -> [TextFragment]? {
@@ -104,7 +153,7 @@ public enum Recognizer {
         try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
         return request.results?.compactMap { observation in
             guard let best = observation.topCandidates(1).first else { return nil }
-            return TextFragment(text: best.string, visionBox: observation.boundingBox)
+            return TextFragment(text: best.string, visionBox: observation.boundingBox, confidence: best.confidence)
         }
     }
 
@@ -175,11 +224,27 @@ public enum ImagePrep {
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
-    /// Doubles (or triples) captures whose longest side is short, using Lanczos resampling.
-    public static func upscaledIfSmall(_ image: CGImage, threshold: Int = 1400) -> CGImage? {
-        let longest = max(image.width, image.height)
-        guard longest > 0, longest < threshold else { return nil }
-        let scale: CGFloat = longest < 500 ? 3 : 2
+    /// Enlargement applied to a small capture before anything is read.
+    public static func initialScale(width: Int, height: Int) -> CGFloat {
+        let longest = max(width, height)
+        return longest >= 1400 ? 1 : (longest < 500 ? 3 : 2)
+    }
+
+    /// How much more to enlarge an image whose text lines turned out short, or nil when it reads fine as it is.
+    /// - Parameter lineHeights: height in pixels of each recognised line.
+    public static func scaleForSmallText(lineHeights: [CGFloat], imageWidth: Int, imageHeight: Int) -> CGFloat? {
+        let longest = CGFloat(max(imageWidth, imageHeight))
+        guard longest > 0, !lineHeights.isEmpty else { return nil }
+        let sorted = lineHeights.sorted()
+        let median = sorted[sorted.count / 2]
+        guard median > 0, median < 20 else { return nil }
+        var scale = min(max((36 / median).rounded(), 2), 4)
+        // Keep the enlarged image within what Vision handles comfortably.
+        while scale > 1, longest * scale > 12000 { scale -= 1 }
+        return scale > 1 ? scale : nil
+    }
+
+    public static func scaled(_ image: CGImage, by scale: CGFloat) -> CGImage? {
         let input = CIImage(cgImage: image)
         guard let filter = CIFilter(name: "CILanczosScaleTransform") else { return nil }
         filter.setValue(input, forKey: kCIInputImageKey)

@@ -126,6 +126,33 @@ final class LayoutEngineTests: XCTestCase {
         XCTAssertTrue(blocks[1].hasPrefix("right column line number 0"))
     }
 
+    /// A sidebar beside a content pane: line heights are unrelated, as measured on a real window.
+    func testSidebarAndContentAreReadOneAfterTheOther() {
+        var fragments: [TextFragment] = []
+        for (index, name) in ["Account", "Usage", "Appearance", "Capabilities", "Notifications", "Privacy"].enumerated() {
+            fragments.append(TextFragment(name, CGRect(x: 0, y: CGFloat(index) * 26, width: CGFloat(name.count) * 10, height: 16)))
+        }
+        for (index, text) in ["Your usage limits", "Current session resets tonight", "Weekly limits", "Learn more about usage limits"].enumerated() {
+            fragments.append(TextFragment(text, CGRect(x: 300, y: 11 + CGFloat(index) * 37, width: CGFloat(text.count) * 10, height: 16)))
+        }
+        let text = engine(.keepLines).compose(fragments)
+        XCTAssertEqual(text, "Account\nUsage\nAppearance\nCapabilities\nNotifications\nPrivacy\n\nYour usage limits\nCurrent session resets tonight\nWeekly limits\nLearn more about usage limits")
+    }
+
+    func testLabelsAndValuesOnTheSameRowsStayTogether() {
+        var fragments: [TextFragment] = []
+        for (index, pair) in [("Name", "TextGrabber"), ("Version", "0.2.2"), ("Licence", "Personal"), ("Size", "4 MB")].enumerated() {
+            fragments.append(line(pair.0, x: 0, row: CGFloat(index)))
+            fragments.append(line(pair.1, x: 400, row: CGFloat(index)))
+        }
+        XCTAssertEqual(engine(.paragraphs).compose(fragments), "Name\tTextGrabber\nVersion\t0.2.2\nLicence\tPersonal\nSize\t4 MB")
+    }
+
+    func testOneWideGapOnASingleRowDoesNotSplit() {
+        let fragments = [line("Inbox", x: 0, row: 0), line("12:30", x: 500, row: 0), line("Lunch on Friday?", x: 0, row: 1)]
+        XCTAssertEqual(engine(.keepLines).compose(fragments), "Inbox 12:30\nLunch on Friday?")
+    }
+
     func testTableBecomesTabSeparated() {
         let fragments = [
             line("Name", x: 0, row: 0), line("Qty", x: 200, row: 0), line("Price", x: 320, row: 0),

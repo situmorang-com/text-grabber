@@ -1,9 +1,9 @@
 #!/bin/bash
-# Builds build/TextGrabber.app, signed with the identity from scripts/setup-signing.sh (or SIGN_IDENTITY, or ad hoc).
+# Builds TextGrabber.app and installs it to /Applications (pass --no-install to leave it in build/). Signed with the identity from scripts/setup-signing.sh (or SIGN_IDENTITY, or ad hoc).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-0.2.2}"
+VERSION="${VERSION:-0.3.0}"
 APP="build/TextGrabber.app"
 
 swift build -c release --arch arm64 --arch x86_64
@@ -77,3 +77,14 @@ else
   codesign --force --sign - --identifier app.textgrabber.TextGrabber "$APP"
 fi
 echo "Built $APP ($(lipo -archs "$APP/Contents/MacOS/TextGrabber"))"
+
+# Install: one copy only, in /Applications, so Spotlight, the shortcut and open-at-login all use the same app.
+if [ "${1:-}" != "--no-install" ]; then
+  INSTALLED="/Applications/TextGrabber.app"
+  pkill -x TextGrabber 2>/dev/null && sleep 1 || true
+  rm -rf "$INSTALLED"
+  ditto "$APP" "$INSTALLED"
+  rm -rf "$APP"
+  open -g "$INSTALLED"
+  echo "Installed and started $INSTALLED"
+fi

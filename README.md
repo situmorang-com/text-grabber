@@ -9,6 +9,12 @@ A macOS menu bar app that copies text from anything on screen: select an area, a
 - Drop image or PDF files on the app icon to read them.
 - The first capture asks for Screen Recording permission. Grant it, then quit and reopen the app.
 
+## Reading windows and small text
+
+- A sidebar beside its content, or any panes whose lines do not line up with each other, are read one after the other. Columns of a table or grid, whose rows do line up, stay together.
+- Small text is enlarged before reading, based on the height of the letters. This matters most on non-Retina displays.
+- A line recognition was unsure about is read a second time from an enlarged crop; this catches small text that would otherwise come back upside-down.
+
 ## Emoji and symbols
 
 Apple's text recognition cannot read emoji or symbols such as ⌘ and ⇧. When the area you capture is a real app window, TextGrabber reads that window's own text through the Accessibility API and uses it for every line it can match, so those characters come out right. The confirmation says "exact text from the app" when this happened.
@@ -23,8 +29,7 @@ To see what an app exposes at a screen point: `TextGrabber --ax-at 400,300` (the
 
 ```sh
 swift test                 # layout engine tests
-./scripts/build-app.sh     # makes build/TextGrabber.app
-open build/TextGrabber.app
+./scripts/build-app.sh     # builds, installs to /Applications and starts it
 ```
 
 Run `./scripts/setup-signing.sh` once before the first build. It creates a self-signed signing identity in its own keychain, so rebuilt apps keep their macOS permissions. Without it the app is signed ad hoc, and macOS asks for Screen Recording and Accessibility again after every rebuild (and keeps asking until the stale entry is cleared with `tccutil reset ScreenCapture app.textgrabber.TextGrabber`).
@@ -44,9 +49,9 @@ Tests run before every commit. On a fresh clone, turn that on with `git config c
 The same binary reads files when given arguments:
 
 ```sh
-build/TextGrabber.app/Contents/MacOS/TextGrabber --mode paragraphs scan.png
-build/TextGrabber.app/Contents/MacOS/TextGrabber --barcode ticket.png
-build/TextGrabber.app/Contents/MacOS/TextGrabber --help
+/Applications/TextGrabber.app/Contents/MacOS/TextGrabber --mode paragraphs scan.png
+/Applications/TextGrabber.app/Contents/MacOS/TextGrabber --barcode ticket.png
+/Applications/TextGrabber.app/Contents/MacOS/TextGrabber --help
 ```
 
 ## Layout

@@ -31,9 +31,38 @@ final class ExactTextTests: XCTestCase {
         XCTAssertEqual(outcome.lines, ["1. Press ⌘⇧1. TextGrabb"])
     }
 
-    func testBulletIsKept() {
-        let outcome = refine(["• Great job de everyone"], ["Great job 👍 everyone"])
+    /// From a real capture of a chat app: the app's text for the sentence lacked the inline code pieces.
+    func testASwapThatWouldLoseWordsIsRefused() {
+        let seen = "To add a partner, copy _TEMPLATE/, drop their decks and price list into sources/, and I can distil"
+        let incomplete = "To add a partner, copy , drop their decks and price list into , and I can distil the seven files"
+        let outcome = refine([seen], [incomplete])
+        XCTAssertEqual(outcome.lines, [seen])
+        XCTAssertEqual(outcome.replaced, 0)
+    }
+
+    /// From a real capture: OCR missed the bullet and misread "says" as "savs"; the app's text has both right.
+    func testBulletThatOCRMissedIsRestored() {
+        let outcome = refine(["A short paragraph below the table: it savs prices and margins"],
+                             ["• A short paragraph below the table: it says prices and margins live only in"])
+        XCTAssertEqual(outcome.lines, ["• A short paragraph below the table: it says prices and margins"])
+    }
+
+    func testSecondLineOfABulletedItemGetsNoBullet() {
+        let outcome = refine(["margin, proposal text) to the partners folder de"],
+                             ["• A new row sends questions (pitch, margin, proposal text) to the partners folder 👍 first"])
+        XCTAssertEqual(outcome.lines, ["margin, proposal text) to the partners folder 👍"])
+    }
+
+    func testBulletTheAppAlsoHasIsKept() {
+        let outcome = refine(["• Great job de everyone"], ["Notes\n• Great job 👍 everyone"])
         XCTAssertEqual(outcome.lines, ["• Great job 👍 everyone"])
+    }
+
+    /// From a real Safari capture: an icon before a heading was read as a bullet; the page's text has none.
+    func testIconMisreadAsABulletIsDropped() {
+        let outcome = refine(["• Depth of features"], [" Depth of features"])
+        XCTAssertEqual(outcome.lines, ["Depth of features"])
+        XCTAssertEqual(outcome.replaced, 1)
     }
 
     func testEmojiAreRestoredIncludingTheOneAtTheEnd() {

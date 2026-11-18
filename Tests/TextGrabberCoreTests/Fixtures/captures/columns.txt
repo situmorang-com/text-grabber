@@ -1,0 +1,3 @@
+The left column talks about capturing an area of the screen with a simple keyboard shortcut and nothing else at all.
+
+The right column explains that the recognised text is copied straight to the clipboard and is ready to paste elsewhere.

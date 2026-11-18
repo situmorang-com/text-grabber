@@ -1,0 +1,5 @@
+Release Notes
+
+Screen text recognition turns pixels back into characters that you can paste anywhere. It works on videos, images, presentations and any window on your Mac.
+
+A well-known problem is that wrapped lines come back with hard line breaks in the middle of sentences.

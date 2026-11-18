@@ -1,0 +1,4 @@
+Item	Qty	Price
+Coffee beans	2	18.50
+Oat milk	6	2.10
+Paper filters		4.75

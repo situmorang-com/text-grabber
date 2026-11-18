@@ -1,0 +1,3 @@
+# Fixtures whose expected text we cannot produce yet. One name per line; the test reports them without failing.
+# Remove a name once it passes.
+emoji   # Apple's OCR does not read emoji or the ⌘ ⇧ key symbols

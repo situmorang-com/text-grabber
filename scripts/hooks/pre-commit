@@ -1,0 +1,8 @@
+#!/bin/sh
+# Runs the tests before every commit. Enabled by: git config core.hooksPath scripts/hooks
+if ! output=$(swift test 2>&1); then
+  echo "$output" | grep -E "error|failed|XCTAssert" | head -30
+  echo "pre-commit: tests failed, commit stopped."
+  exit 1
+fi
+echo "$output" | grep -E "Executed [0-9]+ tests" | tail -1

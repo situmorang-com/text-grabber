@@ -1,0 +1,5 @@
+Things to check before release:
+• Run the full test suite
+• Update the changelog
+• Tag the build
+1. Ship it

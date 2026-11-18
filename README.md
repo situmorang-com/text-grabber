@@ -1,0 +1,49 @@
+# TextGrabber
+
+A macOS menu bar app that copies text from anything on screen: select an area, and the text is on your clipboard.
+
+## Use
+
+- **⌘⇧1** — select an area; the text is copied. Right-clicking the menu bar icon does the same.
+- Menu bar icon — capture the last area again, read a QR code or barcode, read an image on the clipboard, open an image or PDF, recent captures, settings.
+- Drop image or PDF files on the app icon to read them.
+- The first capture asks for Screen Recording permission. Grant it, then quit and reopen the app.
+
+## Build
+
+```sh
+swift test                 # layout engine tests
+./scripts/build-app.sh     # makes build/TextGrabber.app
+open build/TextGrabber.app
+```
+
+The script signs ad hoc, so macOS asks for Screen Recording permission again after each rebuild. To avoid that, sign with a fixed identity: `SIGN_IDENTITY="My Identity" ./scripts/build-app.sh`.
+
+## Tests
+
+- `LayoutEngineTests`: the layout rules on synthetic fragments.
+- `CaptureCorpusTests`: real recognition on every image in `Tests/TextGrabberCoreTests/Fixtures/captures`, compared with the text file beside it. Add real screenshots there; see its README.
+
+The first run in a fresh build can take about a minute while macOS prepares the recognition models; later runs take about a second.
+
+Tests run before every commit. On a fresh clone, turn that on with `git config core.hooksPath scripts/hooks`.
+
+## Command line
+
+The same binary reads files when given arguments:
+
+```sh
+build/TextGrabber.app/Contents/MacOS/TextGrabber --mode paragraphs scan.png
+build/TextGrabber.app/Contents/MacOS/TextGrabber --barcode ticket.png
+build/TextGrabber.app/Contents/MacOS/TextGrabber --help
+```
+
+## Layout
+
+| Path | What it is |
+|---|---|
+| `Sources/TextGrabberCore/LayoutEngine.swift` | Turns OCR fragments into text: reading order, columns, tables, paragraphs, hyphenation |
+| `Sources/TextGrabberCore/Recognizer.swift` | Vision text and barcode recognition, image upscaling, PDF pages |
+| `Sources/TextGrabber/` | The menu bar app: capture, shortcuts, clipboard, HUD, history, settings, CLI |
+| `Tests/TextGrabberCoreTests/` | Layout engine tests |
+| `research/` | What other screen-text apps offer, from public sources |

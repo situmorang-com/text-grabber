@@ -17,6 +17,10 @@ A macOS menu bar app that copies text from anything on screen: select an area, a
 - Small text is enlarged before reading, based on the height of the letters. This matters most on non-Retina displays.
 - A line recognition was unsure about is read a second time from an enlarged crop; this catches small text that would otherwise come back upside-down.
 
+## Scrolling capture
+
+For text longer than the screen: choose "Scrolling Capture…" (menu, a shortcut you set, or `textgrabber://capture-scrolling`), select the area, then scroll through the content. A small panel above the area counts the pictures taken; press Done there, or the same shortcut again, at the end. Pictures are joined by matching the lines they share, so nothing is repeated; if you scroll so fast that two pictures share no line, the confirmation says text may be missing.
+
 ## The editor
 
 "Capture and Edit…" (menu, or a shortcut you set) opens the result in an editor instead of only copying it; Settings can make that the default. "Edit Last Capture…" reopens the last one, and history entries have an Edit button. In the editor you can:
@@ -72,6 +76,7 @@ URL actions, for Shortcuts ("Open URL"), Raycast, Alfred or scripts:
 |---|---|
 | `textgrabber://capture` | Capture text |
 | `textgrabber://capture-edit` | Capture text and open the editor |
+| `textgrabber://capture-scrolling` | Start a scrolling capture, or finish the one running |
 | `textgrabber://capture-last-area` | Capture the last area again |
 | `textgrabber://capture-keep-lines` | Capture text, keeping line breaks |
 | `textgrabber://read-code` | Read a QR code or barcode |

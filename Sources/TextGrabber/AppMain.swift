@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch url.host {
         case "capture": perform(.captureText)
         case "capture-edit": perform(.captureAndEdit)
+        case "capture-scrolling": perform(.captureScrolling)
         case "capture-last-area": perform(.captureLastArea)
         case "capture-keep-lines": perform(.captureKeepLines)
         case "read-code": perform(.captureBarcode)
@@ -84,6 +85,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !files.isEmpty { capture.recogniseFiles(files) }
         case "settings": showSettings()
         case "history": showHistory()
+        case "selftest-scrolling":
+            if let path = value("path"), let image = NSImage(contentsOfFile: path) { capture.scrolling.selfTest(image: image) }
         case "probe":
             guard let rect = value("rect"), CaptureController.rect(from: rect) != nil else { return }
             capture.captureScreen(.text(nil), probeRect: rect)
@@ -100,6 +103,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .captureAndEdit:
             output.editNext = true
             capture.captureScreen(.text(nil))
+        case .captureScrolling:
+            // The same shortcut finishes a scrolling capture that is running.
+            if capture.scrolling.isRunning { capture.scrolling.finish() } else { capture.captureScreen(.scrolling) }
         case .captureBarcode: capture.captureScreen(.barcode)
         case .clipboardImage: capture.recogniseClipboard()
         case .stopSpeaking: output.stopSpeaking()
@@ -126,6 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Read QR Code or Barcode", #selector(captureBarcode), shortcut: .captureBarcode)
         add("Recognise Image on Clipboard", #selector(clipboardImage), shortcut: .clipboardImage)
         add("Capture and Edit…", #selector(captureAndEdit), shortcut: .captureAndEdit)
+        add(capture.scrolling.isRunning ? "Finish Scrolling Capture" : "Scrolling Capture…", #selector(captureScrolling), shortcut: .captureScrolling)
         add("Edit Last Capture…", #selector(editLast)).isEnabled = output.lastResult != nil
         add("Open Image or PDF…", #selector(openFiles))
         menu.addItem(.separator())
@@ -192,6 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func clipboardImage() { capture.recogniseClipboard() }
     @objc private func openFiles() { capture.chooseFiles() }
     @objc private func captureAndEdit() { afterMenuCloses { self.perform(.captureAndEdit) } }
+    @objc private func captureScrolling() { afterMenuCloses { self.perform(.captureScrolling) } }
     @objc private func editLast() { if let last = output.lastResult { output.editor.show(last) } }
     @objc private func stopSpeaking() { output.stopSpeaking() }
     @objc private func quit() { NSApp.terminate(nil) }

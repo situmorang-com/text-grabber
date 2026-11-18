@@ -4,12 +4,15 @@ import TextGrabberCore
 enum CaptureKind {
     case text(LineMode?)   // nil: use the setting
     case barcode
+    /// Select an area, then keep capturing it while the user scrolls.
+    case scrolling
 }
 
 /// Lets the user pick an area with the system crosshair, then hands the pixels to recognition.
 final class CaptureController {
     private(set) var isBusy = false
     private let output: ResultHandler
+    private(set) lazy var scrolling = ScrollingCapture(output: output) { [weak self] in self?.isBusy = false }
 
     init(output: ResultHandler) {
         self.output = output
@@ -60,6 +63,15 @@ final class CaptureController {
                     return
                 }
                 if let rect { Prefs.lastRect = rect }
+                if case .scrolling = kind {
+                    guard let area = Self.rect(from: rect) else {
+                        self.isBusy = false
+                        self.output.fail("Scrolling capture needs an area", detail: "Drag to select the part of the window to scroll through.")
+                        return
+                    }
+                    self.scrolling.start(rect: area, firstFrame: image)   // stays busy until Done or Cancel
+                    return
+                }
                 self.recognise([image], kind: kind, screenRect: Self.rect(from: rect ?? (lastArea ? Prefs.lastRect : nil)))
             }
         }
@@ -179,6 +191,10 @@ final class CaptureController {
                     self.isBusy = false
                     self.output.deliver(payloads.joined(separator: "\n"), kind: .barcode, picture: images.first)
                 }
+            case .scrolling:
+                // Started from the selection instead (see captureScreen); a file or clipboard image is read normally.
+                DispatchQueue.main.async { self.isBusy = false }
+                self.recognise(images, kind: .text(nil), screenRect: screenRect, probe: probe)
             case .text(let override):
                 let options = Prefs.recognitionOptions(lineMode: override)
                 var pages: [[TextFragment]] = []

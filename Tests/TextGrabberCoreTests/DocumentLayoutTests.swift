@@ -74,6 +74,28 @@ final class DocumentLayoutTests: XCTestCase {
                        ["Account", "Usage", "Privacy", "Heading", "Body text of the page."])
     }
 
+    /// From a real capture: Apple made two paragraphs of one line split by an emoji's gap.
+    func testOneLineSplitByAWideGapIsNotTwoColumns() {
+        let fragments = [line("Press it to capture", x: 10, y: 10), line("Great job", x: 10, y: 40), line("see you at 5", x: 140, y: 40),
+                         line("Invoice due on Monday", x: 10, y: 70)]
+        let structure = DocumentStructure(paragraphs: fragments.map(\.box), tables: [])
+        XCTAssertEqual(layout.compose(fragments, structure: structure).render().components(separatedBy: "\n").filter { !$0.isEmpty },
+                       ["Press it to capture", "Great job see you at 5", "Invoice due on Monday"])
+    }
+
+    /// From a real capture: two stacked labels, the first ending in an emoji, grouped by Apple as one paragraph.
+    func testALineAfterAnEmojiThatStartsWithACapitalIsANewLine() {
+        let fragments = [line("Press it to search 🔍", x: 10, y: 10), line("Great job today", x: 10, y: 34)]
+        let structure = DocumentStructure(paragraphs: [rect(10, 10, 300, 44)], tables: [])
+        XCTAssertEqual(layout.compose(fragments, structure: structure).render(), "Press it to search 🔍\nGreat job today")
+    }
+
+    func testWrappedProseStillJoins() {
+        let fragments = [line("The quick brown fox jumps over the", x: 10, y: 10), line("Lazy Dog Inn, as the sign says.", x: 10, y: 34)]
+        let structure = DocumentStructure(paragraphs: [rect(10, 10, 300, 44)], tables: [])
+        XCTAssertEqual(layout.compose(fragments, structure: structure).render(), "The quick brown fox jumps over the Lazy Dog Inn, as the sign says.")
+    }
+
     func testLinesApplePlacedNowhereAreKeptInPosition() {
         let fragments = [line("Top line", x: 10, y: 10), line("Missed by Apple", x: 10, y: 60), line("Bottom line", x: 10, y: 110)]
         let structure = DocumentStructure(paragraphs: [fragments[0].box, fragments[2].box], tables: [])

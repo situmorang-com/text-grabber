@@ -192,7 +192,12 @@ public enum ExactText {
         }
     }
 
+    /// The text without spaces and with typographic variants folded, but with its letter case:
+    /// "WI-FI" against "Wi-Fi" is a misread worth correcting, "Wi - Fi" against "Wi-Fi" is not.
     private static func skeleton(_ text: String) -> String {
-        String(text.filter { !$0.isWhitespace }.map { Encoder.fold($0) }.joined())
+        String(text.filter { !$0.isWhitespace }.map { character -> String in
+            let folded = Encoder.fold(character)
+            return folded == character.lowercased() ? String(character) : folded
+        }.joined())
     }
 }

@@ -126,6 +126,28 @@ public struct DocumentLayout {
         var blocks: [StructuredText.Block] = []
         var previous: CGRect?
         for unit in units {
+            // A piece that continues the previous one on the same row, to its right (Apple sometimes splits a line
+            // at a wide gap such as an emoji), joins it with a space instead of starting a block.
+            if let prior = previous, case .text(let text, let wasSpaced)? = blocks.last, !text.contains("\n"),
+               unit.box.minX >= prior.maxX - lineHeight * 0.2,
+               min(unit.box.maxY, prior.maxY) - max(unit.box.minY, prior.minY) > min(unit.box.height, prior.height) * 0.5 {
+                switch unit.kind {
+                case .paragraph(let p):
+                    let lines = fragments.indices.filter { owners[$0] == .paragraph(p) }.map { fragments[$0] }
+                    let piece = joinLines(lines)
+                    if !piece.contains("\n") {
+                        blocks[blocks.count - 1] = .text(text + " " + piece, spaced: wasSpaced)
+                        previous = prior.union(unit.box)
+                        continue
+                    }
+                case .orphan(let index):
+                    blocks[blocks.count - 1] = .text(text + " " + fragments[index].text, spaced: wasSpaced)
+                    previous = prior.union(unit.box)
+                    continue
+                default:
+                    break
+                }
+            }
             let spaced: Bool = {
                 guard let previous else { return false }
                 if unit.box.minY < previous.minY - lineHeight * 0.5 || !Self.sameColumn(unit.box, previous) { return true }
@@ -194,7 +216,14 @@ public struct DocumentLayout {
         let rows = LayoutEngine.rows(from: lines, charWidth: LayoutEngine.median(lines.map { $0.box.width / CGFloat(max($0.text.count, 1)) }))
         guard var output = rows.first?.text else { return "" }
         for row in rows.dropFirst() {
-            output = (forceSingleLine ? .singleLine : mode) == .keepLines ? output + "\n" + row.text : engine.join(output, row.text)
+            let effective = forceSingleLine ? LineMode.singleLine : mode
+            if effective == .keepLines {
+                output += "\n" + row.text
+            } else if effective == .paragraphs, Self.startsNewLine(after: output, next: row.text) {
+                output += "\n" + row.text
+            } else {
+                output = engine.join(output, row.text)
+            }
         }
         return LayoutEngine.tidy(output)
     }
@@ -208,7 +237,15 @@ public struct DocumentLayout {
         var best: (index: Int, width: CGFloat)?
         for index in 1..<byX.count {
             let gap = byX[index][keyPath: box].minX - reach
-            if gap >= gutter, gap > (best?.width ?? 0) { best = (index, gap) }
+            if gap >= gutter, gap > (best?.width ?? 0) {
+                // A gutter runs down a column. Pieces of a single line separated by a wide gap (an emoji, a
+                // tab) are not columns: measured, "Great job 👍 see you" was split in two at the emoji.
+                let left = byX[..<index], right = byX[index...]
+                let height = { (part: ArraySlice<T>) -> CGFloat in
+                    (part.map { $0[keyPath: box].maxY }.max() ?? 0) - (part.map { $0[keyPath: box].minY }.min() ?? 0)
+                }
+                if height(left) > rowGap * 3.6, height(right) > rowGap * 3.6 { best = (index, gap) }
+            }
             reach = max(reach, byX[index][keyPath: box].maxX)
         }
         if let best {
@@ -276,6 +313,15 @@ public struct DocumentLayout {
             }
         }
         return result
+    }
+
+    /// Inside a paragraph, a line that follows a line ending in a symbol or emoji and starts with a capital is a
+    /// new line, not a wrap: wrapped prose ends in a letter, digit or comma. (Measured: two stacked labels, the
+    /// first ending in 🔍, were grouped by Apple into one paragraph.)
+    static func startsNewLine(after text: String, next: String) -> Bool {
+        guard let last = text.last, let first = next.first, first.isUppercase else { return false }
+        if last.isLetter || last.isNumber || ",;:-(\"'’”".contains(last) { return false }
+        return ExactText.isUnreadable(last) || ".!?…".contains(last)
     }
 
     static func sameColumn(_ a: CGRect, _ b: CGRect) -> Bool {

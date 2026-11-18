@@ -88,6 +88,12 @@ final class ExactTextTests: XCTestCase {
         XCTAssertEqual(outcome.replaced, 0)
     }
 
+    /// From a real 1x capture: a case-only misread is corrected.
+    func testCaseOnlyMisreadIsCorrected() {
+        let outcome = refine(["Small print: settings sync every 15 minutes over WI-FI."], ["Small print: settings sync every 15 minutes over Wi-Fi."])
+        XCTAssertEqual(outcome.lines, ["Small print: settings sync every 15 minutes over Wi-Fi."])
+    }
+
     func testSpacingOnlyDifferencesKeepTheOCRText() {
         // Labels joined without spaces by the source must not glue the words together.
         let outcome = refine(["File Edit View"], ["FileEditView"])

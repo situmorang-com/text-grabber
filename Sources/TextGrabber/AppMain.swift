@@ -48,7 +48,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Dropping or opening files onto the app reads them.
     func application(_ application: NSApplication, open urls: [URL]) {
-        capture.recogniseFiles(urls)
+        let files = urls.filter(\.isFileURL)
+        if !files.isEmpty { capture.recogniseFiles(files) }
+        for url in urls where url.scheme == "textgrabber" { handle(url) }
+    }
+
+    /// textgrabber://capture        the same as the capture shortcut
+    /// textgrabber://probe?rect=x,y,w,h   read that area and write ~/Library/Logs/TextGrabber/last-capture.txt only
+    private func handle(_ url: URL) {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        switch url.host {
+        case "capture":
+            capture.captureScreen(.text(nil))
+        case "probe":
+            guard let rect = query.first(where: { $0.name == "rect" })?.value, CaptureController.rect(from: rect) != nil else { return }
+            capture.captureScreen(.text(nil), probeRect: rect)
+        default:
+            break
+        }
     }
 
     private func perform(_ action: HotKeyAction) {

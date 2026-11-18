@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-0.2.1}"
+VERSION="${VERSION:-0.2.2}"
 APP="build/TextGrabber.app"
 
 swift build -c release --arch arm64 --arch x86_64
@@ -41,6 +41,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>app.textgrabber.TextGrabber</string>
+      <key>CFBundleURLSchemes</key><array><string>textgrabber</string></array>
+    </dict>
+  </array>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>

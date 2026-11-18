@@ -25,8 +25,11 @@ public enum ExactText {
         struct Match { var source: Int; var range: Range<Int>; var distance: Int }
         var matches: [Match?] = Array(repeating: nil, count: lines.count)
 
-        for (index, line) in lines.enumerated() {
-            let pattern = Array(line.trimmingCharacters(in: .whitespacesAndNewlines))
+        // A list number or bullet is drawn by the app and is often missing from its text: match what follows it.
+        let split = lines.map { splitListMarker($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+
+        for (index, parts) in split.enumerated() {
+            let pattern = Array(parts.body)
             guard pattern.count >= 3, index < candidates.count else { continue }
             let codes = encoder.encode(pattern)
             let allowed = max(1, Int(Double(pattern.count) * tolerance))
@@ -77,14 +80,20 @@ public enum ExactText {
                 .replacingOccurrences(of: "\n", with: " ")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             // Leave the line alone when the only difference is spacing: OCR is right about what is visible.
-            if skeleton(exact) == skeleton(lines[index]) { continue }
-            output[index] = exact
+            if skeleton(exact) == skeleton(split[index].body) { continue }
+            output[index] = split[index].marker + exact
             replaced += 1
         }
         return Outcome(lines: output, replaced: replaced)
     }
 
     public static let maxSourceLength = 8000
+
+    /// "2. Click here" → ("2. ", "Click here"); text without a list marker comes back whole as the body.
+    static func splitListMarker(_ line: String) -> (marker: String, body: String) {
+        guard let range = line.range(of: #"^(\(?[0-9]{1,3}[.)]|[•◦▪‣*–-])\s+"#, options: .regularExpression) else { return ("", line) }
+        return (String(line[range]), String(line[range.upperBound...]))
+    }
 
     // MARK: Matching
 

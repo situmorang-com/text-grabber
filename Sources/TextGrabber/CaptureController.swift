@@ -17,12 +17,17 @@ final class CaptureController {
 
     // MARK: Screen
 
-    func captureScreen(_ kind: CaptureKind, lastArea: Bool = false) {
+    /// - Parameter probeRect: capture this exact area ("x,y,w,h") and only write the capture log:
+    ///   no clipboard, history or confirmation. For checking what the app does on a known piece of screen.
+    func captureScreen(_ kind: CaptureKind, lastArea: Bool = false, probeRect: String? = nil) {
         guard !isBusy else { return }
         guard ensureScreenAccess() else { return }
+        if Prefs.bool(Prefs.Key.exactText) { AccessibilityText.wakeRunningApps() }
 
         var arguments: [String] = []
-        if lastArea, let rect = Prefs.lastRect {
+        if let probeRect {
+            arguments += ["-R", probeRect]
+        } else if lastArea, let rect = Prefs.lastRect {
             arguments += ["-R", rect]
         } else {
             arguments += ["-i"]
@@ -45,6 +50,10 @@ final class CaptureController {
                 guard let self else { return }
                 guard let data, let image = ImagePrep.image(from: data) else {
                     self.isBusy = false   // Esc pressed: nothing to do
+                    return
+                }
+                if let probeRect {
+                    self.recognise([image], kind: kind, screenRect: Self.rect(from: probeRect), probe: true)
                     return
                 }
                 if let rect { Prefs.lastRect = rect }
@@ -71,6 +80,26 @@ final class CaptureController {
               let values = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [NSNumber],
               values.count == 4 else { return nil }
         return values.map { String($0.intValue) }.joined(separator: ",")
+    }
+
+    /// For the first few screen captures without Accessibility access, say what it would add.
+    private func accessHint(_ screenRect: CGRect?) -> String? {
+        let key = "accessHintsShown"
+        let shown = Prefs.defaults.integer(forKey: key)
+        guard screenRect != nil, Prefs.bool(Prefs.Key.exactText), !AccessibilityText.isTrusted, shown < 3 else { return nil }
+        Prefs.defaults.set(shown + 1, forKey: key)
+        return "for exact emoji and symbols, grant Accessibility in Settings → Recognition"
+    }
+
+    /// True when every sampled pixel is nearly the same colour.
+    static func looksBlank(_ image: CGImage) -> Bool {
+        let side = 16
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+        guard let context = CGContext(data: &pixels, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return false }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+        let colour = pixels.enumerated().filter { $0.offset % 4 != 3 }.map(\.element)
+        return (colour.max() ?? 0) - (colour.min() ?? 0) < 12
     }
 
     static func rect(from text: String?) -> CGRect? {
@@ -134,9 +163,9 @@ final class CaptureController {
 
     // MARK: Recognition
 
-    private func recognise(_ images: [CGImage], kind: CaptureKind, screenRect: CGRect? = nil) {
+    private func recognise(_ images: [CGImage], kind: CaptureKind, screenRect: CGRect? = nil, probe: Bool = false) {
         isBusy = true
-        output.showProgressIfSlow()
+        if !probe { output.showProgressIfSlow() }
         DispatchQueue.global(qos: .userInitiated).async {
             switch kind {
             case .barcode:
@@ -150,6 +179,10 @@ final class CaptureController {
                 var pages: [[TextFragment]] = []
                 var failure: Error?
                 var exactLines = 0
+                var report = ""
+                if probe, let image = images.first {
+                    report += "image: \(image.width)×\(image.height) px, \(Self.looksBlank(image) ? "BLANK (one flat colour: the app may lack Screen Recording access)" : "has content")\n"
+                }
                 for image in images {
                     do { pages.append(try Recognizer.readFragments(in: image, options: options).fragments) }
                     catch { failure = error }
@@ -159,6 +192,7 @@ final class CaptureController {
                     let refined = AccessibilityText.refine(pages[0], capturedFrom: screenRect)
                     pages[0] = refined.fragments
                     exactLines = refined.replaced
+                    report += refined.report
                 }
                 DispatchQueue.main.async {
                     self.isBusy = false
@@ -166,10 +200,15 @@ final class CaptureController {
                     let text = pages.map { Recognizer.compose($0, options: options) }
                         .filter { !$0.isEmpty }
                         .joined(separator: "\n\n")
+                    if !report.isEmpty || probe {
+                        report += "lines recognised: \(pages.reduce(0) { $0 + $1.count })\n"
+                        AccessibilityText.writeLog(report + "\ntext delivered (\(options.lineMode.rawValue)):\n" + text + "\n")
+                    }
+                    if probe { return }
                     if text.isEmpty, let failure {
                         self.output.fail("Text recognition failed", detail: failure.localizedDescription)
                     } else {
-                        self.output.deliver(text, kind: .text, note: exactLines > 0 ? "exact text from the app" : nil)
+                        self.output.deliver(text, kind: .text, note: exactLines > 0 ? "exact text from the app" : self.accessHint(screenRect))
                     }
                 }
             }

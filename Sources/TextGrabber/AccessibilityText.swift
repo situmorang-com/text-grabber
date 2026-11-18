@@ -15,11 +15,53 @@ enum AccessibilityText {
         }
     }
 
+    /// Web-based apps (Electron, Chromium) build their accessibility tree only when asked, and take a moment
+    /// to do it. Ask as the capture starts, so the text is there by the time the selection is made.
+    static func wakeRunningApps() {
+        guard isTrusted else { return }
+        let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+        DispatchQueue.global(qos: .userInitiated).async {
+            for app in apps {
+                let element = AXUIElementCreateApplication(app.processIdentifier)
+                AXUIElementSetMessagingTimeout(element, 0.2)
+                AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            }
+        }
+    }
+
     /// Replaces OCR text with the app's own text where the two line up.
     /// - Parameter screenRect: the captured area in global screen points, top-left origin.
-    /// - Returns: the fragments, and how many of them were replaced.
-    static func refine(_ fragments: [TextFragment], capturedFrom screenRect: CGRect) -> (fragments: [TextFragment], replaced: Int) {
-        guard isTrusted, !fragments.isEmpty else { return (fragments, 0) }
+    /// - Returns: the fragments, how many of them were replaced, and a plain-text account of what happened.
+    static func refine(_ fragments: [TextFragment], capturedFrom screenRect: CGRect) -> (fragments: [TextFragment], replaced: Int, report: String) {
+        var report = "accessibility access: \(isTrusted ? "yes" : "NO (Settings → Recognition → Grant Access)")\n"
+        report += "captured area: \(Int(screenRect.minX)),\(Int(screenRect.minY)) \(Int(screenRect.width))×\(Int(screenRect.height))\n"
+        guard isTrusted, !fragments.isEmpty else { return (fragments, 0, report) }
+
+        var attempt = collect(fragments, screenRect)
+        if attempt.collector.texts.isEmpty {
+            // The app may still be building its tree: give it one more chance.
+            Thread.sleep(forTimeInterval: 0.4)
+            attempt = collect(fragments, screenRect)
+            report += "no text from the app on the first try; retried\n"
+        }
+        let (collector, candidates) = attempt
+        report += "apps under the capture: \(collector.appNames.sorted().joined(separator: ", "))\n"
+        report += "pieces of app text found: \(collector.texts.count)\n"
+        guard !collector.texts.isEmpty else { return (fragments, 0, report + "result: the app exposed no text here; recognition only\n") }
+
+        let outcome = ExactText.refine(lines: fragments.map(\.text), candidates: candidates, sources: collector.texts)
+        var refined = fragments
+        for index in refined.indices {
+            refined[index].text = outcome.lines[index]
+            let sources = candidates[index].map { "\"" + collector.texts[$0].prefix(90).replacingOccurrences(of: "\n", with: "⏎") + "\"" }
+            report += "\nline \(index + 1) recognised: \"\(fragments[index].text)\"\n"
+            report += "  app text here: \(sources.isEmpty ? "none" : sources.joined(separator: " | "))\n"
+            report += "  used: \"\(outcome.lines[index])\"\(outcome.lines[index] == fragments[index].text ? "" : "   ← from the app")\n"
+        }
+        return (refined, outcome.replaced, report + "\nresult: \(outcome.replaced) of \(fragments.count) lines taken from the app\n")
+    }
+
+    private static func collect(_ fragments: [TextFragment], _ screenRect: CGRect) -> (collector: Collector, candidates: [[Int]]) {
         let collector = Collector(budget: 1.2)
         let candidates: [[Int]] = fragments.map { fragment in
             // Three points along the line, so a line made of several text runs finds all of them.
@@ -31,16 +73,22 @@ enum AccessibilityText {
             }
             return found
         }
-        guard !collector.texts.isEmpty else { return (fragments, 0) }
-        let outcome = ExactText.refine(lines: fragments.map(\.text), candidates: candidates, sources: collector.texts)
-        var refined = fragments
-        for index in refined.indices { refined[index].text = outcome.lines[index] }
-        return (refined, outcome.replaced)
+        return (collector, candidates)
+    }
+
+    /// Where the account of the last capture is kept, for working out why a capture was not exact.
+    static let logFile = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Logs/TextGrabber/last-capture.txt")
+
+    static func writeLog(_ text: String) {
+        try? FileManager.default.createDirectory(at: logFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? (Date().formatted(date: .abbreviated, time: .standard) + "\n" + text).write(to: logFile, atomically: true, encoding: .utf8)
     }
 
     /// Gathers text from the elements under screen points, reading each element once.
     final class Collector {
         private(set) var texts: [String] = []
+        private(set) var appNames: Set<String> = []
         private var indexOfText: [String: Int] = [:]
         private var seen: [AXUIElement: [Int]] = [:]
         private var preparedApps: Set<pid_t> = []
@@ -89,6 +137,7 @@ enum AccessibilityText {
             var pid: pid_t = 0
             guard AXUIElementGetPid(element, &pid) == .success, !preparedApps.contains(pid) else { return }
             preparedApps.insert(pid)
+            appNames.insert(NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)")
             let app = AXUIElementCreateApplication(pid)
             AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         }

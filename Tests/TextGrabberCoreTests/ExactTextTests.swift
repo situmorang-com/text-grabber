@@ -16,6 +16,26 @@ final class ExactTextTests: XCTestCase {
         XCTAssertEqual(outcome.replaced, 1)
     }
 
+    /// A real capture from a chat window: a numbered list, cut off mid-word at the right edge.
+    func testNumberedListCutOffMidWordKeepsItsNumber() {
+        let item1 = "Press ⌘⇧1. TextGrabber will show this same dialog once more, possibly along with macOS's own prompt."
+        let item2 = "Click Open System Settings and turn TextGrabber on."
+        let outcome = ExactText.refine(lines: ["1. Press 9 01. TextGrabb", "2. Click Open System Se"],
+                                       candidates: [[0], [1]], sources: [item1, item2])
+        XCTAssertEqual(outcome.lines, ["1. Press ⌘⇧1. TextGrabb", "2. Click Open System Se"])
+        XCTAssertEqual(outcome.replaced, 1)
+    }
+
+    func testListMarkerPresentInTheSourceIsNotDoubled() {
+        let outcome = refine(["1. Press 9 01. TextGrabb"], ["1. Press ⌘⇧1. TextGrabber will show this"])
+        XCTAssertEqual(outcome.lines, ["1. Press ⌘⇧1. TextGrabb"])
+    }
+
+    func testBulletIsKept() {
+        let outcome = refine(["• Great job de everyone"], ["Great job 👍 everyone"])
+        XCTAssertEqual(outcome.lines, ["• Great job 👍 everyone"])
+    }
+
     func testEmojiAreRestoredIncludingTheOneAtTheEnd() {
         let outcome = refine(["Great job de see you at 5 → room B V"],
                              ["Great job 👍 see you 🎉 at 5 → room B ✅"])

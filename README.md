@@ -7,7 +7,7 @@ A macOS menu bar app that copies text from anything on screen: select an area, a
 - **⌘⇧1** — select an area; the text is copied. Right-clicking the menu bar icon does the same.
 - Menu bar icon — capture the last area again, read a QR code or barcode, read an image on the clipboard, open an image or PDF, recent captures, settings.
 - Drop image or PDF files on the app icon to read them.
-- The first capture asks for Screen Recording permission. Grant it, then quit and reopen the app.
+- On first launch a setup window walks through the two permissions: Screen Recording (required; macOS applies it only after a restart, so the window offers a Restart button) and Accessibility (recommended, for exact emoji and symbols). It shows again whenever Screen Recording is missing, and from the menu with "Set Up TextGrabber…".
 
 ## Reading windows and small text
 

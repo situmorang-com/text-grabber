@@ -31,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     private var settingsWindow: NSWindow?
     private var historyWindow: NSWindow?
+    private var setupWindow: NSWindow?
+    private let setupState = SetupState()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Prefs.registerDefaults()
@@ -50,6 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // So the first capture is as quick as the rest.
         DispatchQueue.global(qos: .utility).async { Recognizer.warmUp() }
+
+        // Until setup is finished, and whenever capture is not possible, show the setup window.
+        if !Prefs.bool(Prefs.Key.setupDone) || !CGPreflightScreenCaptureAccess() { showSetup() }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -84,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let files = query.filter { $0.name == "path" }.compactMap(\.value).map { URL(fileURLWithPath: $0) }
             if !files.isEmpty { capture.recogniseFiles(files) }
         case "settings": showSettings()
+        case "setup": showSetup()
         case "history": showHistory()
         case "selftest-scrolling":
             if let path = value("path"), let image = NSImage(contentsOfFile: path) { capture.scrolling.selfTest(image: image) }
@@ -174,6 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Show History…", #selector(showHistory))
         menu.addItem(.separator())
 
+        add("Set Up TextGrabber…", #selector(showSetup))
         add("Settings…", #selector(showSettings)).keyEquivalent = ","
         add("Quit TextGrabber", #selector(quit)).keyEquivalent = "q"
     }
@@ -232,6 +239,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: Windows
+
+    @objc func showSetup() {
+        setupState.refresh()
+        if setupWindow == nil {
+            let view = SetupView(state: setupState, tryCapture: { [weak self] in
+                self?.setupWindow?.orderOut(nil)
+                self?.afterMenuCloses { self?.perform(.captureText) }
+            }, finish: { [weak self] in
+                if self?.setupState.screenRecording == true { Prefs.defaults.set(true, forKey: Prefs.Key.setupDone) }
+                self?.setupWindow?.close()
+            })
+            setupWindow = makeWindow(title: "Set Up TextGrabber", size: NSSize(width: 520, height: 470), content: view)
+        }
+        present(setupWindow)
+    }
 
     @objc func showSettings() {
         if settingsWindow == nil {

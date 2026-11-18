@@ -26,6 +26,7 @@ enum Prefs {
         static let translationTarget = "translationTarget"
         static let openEditor = "openEditorAfterCapture"
         static let historyPictures = "historyPictures"
+        static let setupDone = "setupDone"
     }
 
     static let defaults = UserDefaults.standard
@@ -52,6 +53,7 @@ enum Prefs {
             Key.tableStyle: StructuredText.TableStyle.tabs.rawValue,
             Key.openEditor: false,
             Key.historyPictures: true,
+            Key.setupDone: false,
         ])
     }
 

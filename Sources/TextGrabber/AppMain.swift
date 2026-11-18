@@ -16,8 +16,19 @@ enum AppMain {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
-    private let output = ResultHandler()
-    private lazy var capture = CaptureController(output: output)
+    let output = ResultHandler()
+    private(set) lazy var capture = CaptureController(output: output)
+
+    /// Captures an area the user selects and returns its text (for Shortcuts). Nil when cancelled.
+    func captureForShortcut(kind: CaptureKind) async -> String? {
+        await withCheckedContinuation { continuation in
+            output.onNextResult = { continuation.resume(returning: $0) }
+            if !capture.captureScreen(kind) {
+                output.onNextResult = nil
+                continuation.resume(returning: nil)
+            }
+        }
+    }
     private var settingsWindow: NSWindow?
     private var historyWindow: NSWindow?
 

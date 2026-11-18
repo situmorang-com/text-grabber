@@ -21,15 +21,26 @@ final class ResultHandler {
 
     var isSpeaking: Bool { synthesizer.isSpeaking }
 
+    /// Called once with the next result's text, or nil when the capture is cancelled or fails (Shortcuts).
+    var onNextResult: ((String?) -> Void)?
+
     func cancelPending() {
         editNext = false
         cancelProgress()
+        finishPending(nil)
+    }
+
+    private func finishPending(_ text: String?) {
+        let handler = onNextResult
+        onNextResult = nil
+        handler?(text)
     }
 
     func deliver(_ text: String, kind: ResultKind, note: String? = nil, result: CaptureResult? = nil) {
         cancelProgress()
         let openEditor = editNext || Prefs.bool(Prefs.Key.openEditor)
         editNext = false
+        finishPending(text)
         guard !text.isEmpty else {
             hud.show(symbol: kind == .barcode ? "qrcode.viewfinder" : "text.magnifyingglass",
                      title: kind == .barcode ? "No code found" : "No text found", detail: nil)
@@ -67,6 +78,7 @@ final class ResultHandler {
 
     func fail(_ title: String, detail: String?) {
         cancelProgress()
+        finishPending(nil)
         hud.show(symbol: "exclamationmark.triangle.fill", title: title, detail: detail)
     }
 

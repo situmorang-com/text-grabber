@@ -58,6 +58,10 @@ Tests run before every commit. On a fresh clone, turn that on with `git config c
 
 ## Automation
 
+**Shortcuts** has three TextGrabber actions: *Capture Text from Screen* and *Read QR Code from Screen* (you select an area; the action returns the text), and *Extract Text from Image* (images or PDFs in, text out, with line-break and format options). "Capture text with TextGrabber" also works with Siri and Spotlight. The build script generates the metadata Shortcuts needs, which Xcode would normally produce.
+
+**Raycast**: add `integrations/raycast` as a script directory (see its README).
+
 URL actions, for Shortcuts ("Open URL"), Raycast, Alfred or scripts:
 
 | URL | Does |

@@ -3,10 +3,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-0.3.0}"
+VERSION="${VERSION:-0.4.0}"
 APP="build/TextGrabber.app"
 
-swift build -c release --arch arm64 --arch x86_64
+# The extra flags make the compiler record the constant values Shortcuts metadata is built from.
+CONST_FLAGS=(-Xswiftc -emit-const-values -Xswiftc -Xfrontend -Xswiftc -const-gather-protocols-file
+             -Xswiftc -Xfrontend -Xswiftc "$PWD/scripts/app-intents-protocols.json")
+swift build -c release --arch arm64 --arch x86_64 "${CONST_FLAGS[@]}"
 BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/TextGrabber"
 
 rm -rf "$APP"
@@ -20,6 +23,21 @@ for ARCH in $(lipo -archs "$APP/Contents/MacOS/TextGrabber"); do
   xcrun vtool -arch "$ARCH" -set-build-version macos 14.0 "$SDK_VERSION" -replace \
     -output "$APP/Contents/MacOS/TextGrabber" "$APP/Contents/MacOS/TextGrabber" 2>/dev/null
 done
+
+# Shortcuts actions: Xcode generates this metadata bundle; a Swift package build does not, so run the same tool.
+WORK="$(mktemp -d)"
+find "$PWD/Sources/TextGrabber" -name "*.swift" > "$WORK/sources.txt"
+find "$PWD/.build" -path "*TextGrabber.build*" -name "*.swiftconstvalues" -newer Package.swift | grep -v TextGrabberCore > "$WORK/constvalues.txt" || true
+xcrun appintentsmetadataprocessor --output "$APP/Contents/Resources" \
+  --toolchain-dir "$(dirname "$(dirname "$(dirname "$(xcrun --find swift)")")")" \
+  --module-name TextGrabber --sdk-root "$(xcrun --show-sdk-path)" \
+  --xcode-version "$(xcodebuild -version | awk '/Build version/{print $3}')" \
+  --platform-family macOS --deployment-target 14.0 --target-triple arm64-apple-macos14.0 \
+  --binary-file "$APP/Contents/MacOS/TextGrabber" \
+  --source-file-list "$WORK/sources.txt" --swift-const-vals-list "$WORK/constvalues.txt" --force --quiet-warnings 2>&1 \
+  | grep -iE "error|warning" || true
+rm -rf "$WORK"
+[ -d "$APP/Contents/Resources/Metadata.appintents" ] || { echo "Shortcuts metadata was not generated"; exit 1; }
 
 # Icon
 ICONSET="build/AppIcon.iconset"

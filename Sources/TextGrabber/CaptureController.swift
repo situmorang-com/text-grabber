@@ -19,9 +19,11 @@ final class CaptureController {
 
     /// - Parameter probeRect: capture this exact area ("x,y,w,h") and only write the capture log:
     ///   no clipboard, history or confirmation. For checking what the app does on a known piece of screen.
-    func captureScreen(_ kind: CaptureKind, lastArea: Bool = false, probeRect: String? = nil) {
-        guard !isBusy else { return }
-        guard ensureScreenAccess() else { return }
+    /// - Returns: whether a capture started (false when one is already running or access is missing).
+    @discardableResult
+    func captureScreen(_ kind: CaptureKind, lastArea: Bool = false, probeRect: String? = nil) -> Bool {
+        guard !isBusy else { return false }
+        guard ensureScreenAccess() else { return false }
         if Prefs.bool(Prefs.Key.exactText) { AccessibilityText.wakeRunningApps() }
 
         var arguments: [String] = []
@@ -67,7 +69,9 @@ final class CaptureController {
         } catch {
             isBusy = false
             output.fail("Screen capture could not start", detail: error.localizedDescription)
+            return false
         }
+        return true
     }
 
     /// The selected rectangle, which macOS records on the screenshot file itself.

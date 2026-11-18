@@ -27,6 +27,10 @@ A macOS menu bar app that copies text from anything on screen: select an area, a
 
 Nothing leaves the Mac for either.
 
+## History
+
+Captures are kept on this Mac (up to 200, searchable), each with a small picture of what was captured; the picture can be turned off in Settings. Pin a capture to keep it at the top: pinned captures are never dropped when the history is full, nor by "Clear History".
+
 ## Emoji and symbols
 
 Apple's text recognition cannot read emoji or symbols such as ⌘ and ⇧. When the area you capture is a real app window, TextGrabber reads that window's own text through the Accessibility API and uses it for every line it can match, so those characters come out right. The confirmation says "exact text from the app" when this happened.

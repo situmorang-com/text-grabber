@@ -177,7 +177,7 @@ final class CaptureController {
                 let payloads = images.flatMap { (try? Recognizer.readBarcodes(in: $0)) ?? [] }
                 DispatchQueue.main.async {
                     self.isBusy = false
-                    self.output.deliver(payloads.joined(separator: "\n"), kind: .barcode)
+                    self.output.deliver(payloads.joined(separator: "\n"), kind: .barcode, picture: images.first)
                 }
             case .text(let override):
                 let options = Prefs.recognitionOptions(lineMode: override)
@@ -222,7 +222,8 @@ final class CaptureController {
                         self.output.fail("Text recognition failed", detail: failure.localizedDescription)
                     } else {
                         self.output.deliver(text, kind: .text, note: exactLines > 0 ? "exact text from the app" : self.accessHint(screenRect),
-                                            result: CaptureResult(pages: pages, structures: structures, options: options, kind: .text))
+                                            result: CaptureResult(pages: pages, structures: structures, options: options, kind: .text),
+                                            picture: images.first)
                     }
                 }
             }

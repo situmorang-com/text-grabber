@@ -25,6 +25,7 @@ private struct GeneralSettings: View {
     @AppStorage(Prefs.Key.speak) private var speak = false
     @AppStorage(Prefs.Key.speechRate) private var speechRate = 0.5
     @AppStorage(Prefs.Key.openEditor) private var openEditor = false
+    @AppStorage(Prefs.Key.historyPictures) private var historyPictures = true
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
 
@@ -48,6 +49,8 @@ private struct GeneralSettings: View {
                 Toggle("Open the editor (edit, translate, clean up) instead of only copying", isOn: $openEditor)
                 Toggle("Show a confirmation with a preview", isOn: $showHUD)
                 Toggle("Keep a history of captures on this Mac", isOn: $keepHistory)
+                Toggle("Include a small picture of each capture in the history", isOn: $historyPictures)
+                    .disabled(!keepHistory)
                 Toggle("Open the link when the capture is a single link", isOn: $openLinks)
                 Toggle("Additive clipboard: add each capture to the previous ones", isOn: $additive)
                 Toggle("Speak the text", isOn: $speak)
@@ -231,10 +234,11 @@ private struct ShortcutRecorder: View {
 }
 
 struct HistoryView: View {
-    @ObservedObject var store: HistoryStore
+    @ObservedObject var store: CaptureHistory
     var copy: (String) -> Void
     var edit: (HistoryEntry) -> Void = { _ in }
     @State private var query = ""
+    @State private var confirmClear = false
 
     private var matches: [HistoryEntry] {
         query.isEmpty ? store.entries : store.entries.filter { $0.text.localizedCaseInsensitiveContains(query) }
@@ -248,32 +252,63 @@ struct HistoryView: View {
                                        description: Text(query.isEmpty ? "Text you capture appears here." : "Try a different search."))
             } else {
                 List(matches) { entry in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(entry.text).lineLimit(4).textSelection(.enabled)
-                        HStack {
-                            Text(entry.date.formatted(date: .abbreviated, time: .shortened))
-                            if entry.kind == .barcode { Text("· QR or barcode") }
-                            Spacer()
-                            Button("Edit") { edit(entry) }
-                            Button("Copy") { copy(entry.text) }
-                            Button("Delete", role: .destructive) { store.remove(entry) }
+                    HStack(alignment: .top, spacing: 10) {
+                        Thumbnail(url: store.thumbnailURL(entry))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.text).lineLimit(4).textSelection(.enabled)
+                            HStack {
+                                if entry.pinned { Image(systemName: "pin.fill").foregroundStyle(.orange) }
+                                Text(entry.date.formatted(date: .abbreviated, time: .shortened))
+                                if entry.kind == "barcode" { Text("· QR or barcode") }
+                                Spacer()
+                                Button(entry.pinned ? "Unpin" : "Pin") { store.setPinned(entry, !entry.pinned) }
+                                Button("Edit") { edit(entry) }
+                                Button("Copy") { copy(entry.text) }
+                                Button("Delete", role: .destructive) { store.remove(entry) }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .buttonStyle(.borderless)
                         }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .buttonStyle(.borderless)
                     }
                     .padding(.vertical, 4)
                 }
             }
             Divider()
             HStack {
-                Text("\(store.entries.count) saved on this Mac only").font(.caption).foregroundStyle(.secondary)
+                let pinned = store.entries.filter(\.pinned).count
+                Text("\(store.entries.count) saved on this Mac only" + (pinned > 0 ? ", \(pinned) pinned" : ""))
+                    .font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("Clear History", role: .destructive) { store.clear() }.disabled(store.entries.isEmpty)
+                Button("Clear History…", role: .destructive) { confirmClear = true }
+                    .disabled(store.entries.allSatisfy(\.pinned))
             }
             .padding(10)
         }
         .searchable(text: $query, placement: .toolbar, prompt: "Search captures")
-        .frame(minWidth: 440, minHeight: 360)
+        .frame(minWidth: 480, minHeight: 360)
+        .confirmationDialog("Clear the history?", isPresented: $confirmClear) {
+            Button("Clear All but Pinned", role: .destructive) { store.clearUnpinned() }
+        } message: {
+            Text("Captures and their pictures are deleted from this Mac. Pinned captures stay.")
+        }
+    }
+}
+
+/// A small picture of the capture, loaded from disk.
+private struct Thumbnail: View {
+    let url: URL?
+
+    var body: some View {
+        Group {
+            if let url, let image = NSImage(contentsOf: url) {
+                Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
+            } else {
+                Image(systemName: "text.viewfinder").font(.title2).foregroundStyle(.tertiary)
+            }
+        }
+        .frame(width: 84, height: 56)
+        .background(.quaternary.opacity(0.4))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }

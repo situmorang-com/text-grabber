@@ -150,7 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let recent = NSMenu()
         for entry in output.history.entries.prefix(10) {
-            let flat = entry.text.replacingOccurrences(of: "\n", with: " ")
+            let flat = (entry.pinned ? "📌 " : "") + entry.text.replacingOccurrences(of: "\n", with: " ")
             let item = NSMenuItem(title: flat.count > 60 ? String(flat.prefix(60)) + "…" : flat,
                                   action: #selector(copyHistoryEntry(_:)), keyEquivalent: "")
             item.target = self
@@ -239,7 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.output.write(text)
                 self?.output.notify(symbol: "doc.on.clipboard", title: "Copied again")
             } edit: { [weak self] entry in
-                self?.output.editor.show(.fixed(entry.text, kind: entry.kind))
+                self?.output.editor.show(.fixed(entry.text, kind: entry.resultKind))
             }
             historyWindow = makeWindow(title: "Capture History", size: NSSize(width: 560, height: 520), content: view,
                                        resizable: true)

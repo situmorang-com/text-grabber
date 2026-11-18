@@ -25,6 +25,7 @@ enum Prefs {
         static let tableStyle = "tableStyle"
         static let translationTarget = "translationTarget"
         static let openEditor = "openEditorAfterCapture"
+        static let historyPictures = "historyPictures"
     }
 
     static let defaults = UserDefaults.standard
@@ -50,6 +51,7 @@ enum Prefs {
             Key.outputFormat: StructuredText.Format.plain.rawValue,
             Key.tableStyle: StructuredText.TableStyle.tabs.rawValue,
             Key.openEditor: false,
+            Key.historyPictures: true,
         ])
     }
 

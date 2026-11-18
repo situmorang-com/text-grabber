@@ -9,7 +9,7 @@ enum ResultKind: String, Codable {
 
 /// Everything that happens once text has been recognised: clipboard, history, HUD, speech, links.
 final class ResultHandler {
-    let history = HistoryStore()
+    let history = CaptureHistory.standard()
     private let hud = HUD()
     private let synthesizer = AVSpeechSynthesizer()
     private var progressTimer: Timer?
@@ -36,7 +36,7 @@ final class ResultHandler {
         handler?(text)
     }
 
-    func deliver(_ text: String, kind: ResultKind, note: String? = nil, result: CaptureResult? = nil) {
+    func deliver(_ text: String, kind: ResultKind, note: String? = nil, result: CaptureResult? = nil, picture: CGImage? = nil) {
         cancelProgress()
         let openEditor = editNext || Prefs.bool(Prefs.Key.openEditor)
         editNext = false
@@ -50,7 +50,9 @@ final class ResultHandler {
         }
 
         copy(text)
-        if Prefs.bool(Prefs.Key.keepHistory) { history.add(text, kind: kind) }
+        if Prefs.bool(Prefs.Key.keepHistory) {
+            history.add(text, kind: kind.rawValue, picture: Prefs.bool(Prefs.Key.historyPictures) ? picture : nil)
+        }
         lastResult = result ?? .fixed(text, kind: kind)
         if openEditor, let lastResult {
             editor.show(lastResult)
@@ -245,48 +247,16 @@ final class HUD {
 
 // MARK: - History
 
-struct HistoryEntry: Codable, Identifiable, Equatable {
-    var id = UUID()
-    var date = Date()
-    var text: String
-    var kind: ResultKind
+typealias HistoryStore = CaptureHistory
+
+extension CaptureHistory {
+    /// The app's history, in Application Support.
+    static func standard() -> CaptureHistory {
+        CaptureHistory(folder: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("TextGrabber", isDirectory: true))
+    }
 }
 
-/// Past captures, kept in a local file only. Newest first.
-final class HistoryStore: ObservableObject {
-    @Published private(set) var entries: [HistoryEntry] = []
-    private let limit = 200
-    private let file: URL
-
-    init() {
-        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("TextGrabber", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        file = folder.appendingPathComponent("history.json")
-        if let data = try? Data(contentsOf: file), let saved = try? JSONDecoder().decode([HistoryEntry].self, from: data) {
-            entries = saved
-        }
-    }
-
-    func add(_ text: String, kind: ResultKind) {
-        entries.removeAll { $0.text == text }
-        entries.insert(HistoryEntry(text: text, kind: kind), at: 0)
-        if entries.count > limit { entries.removeLast(entries.count - limit) }
-        save()
-    }
-
-    func remove(_ entry: HistoryEntry) {
-        entries.removeAll { $0.id == entry.id }
-        save()
-    }
-
-    func clear() {
-        entries.removeAll()
-        save()
-    }
-
-    private func save() {
-        guard let data = try? JSONEncoder().encode(entries) else { return }
-        try? data.write(to: file, options: .atomic)
-    }
+extension HistoryEntry {
+    var resultKind: ResultKind { ResultKind(rawValue: kind) ?? .text }
 }

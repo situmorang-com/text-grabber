@@ -299,9 +299,7 @@ struct ResultPanelView: View {
             .padding(.top, 10)
             .padding(.bottom, 8)
 
-            TextEditor(text: $model.text)
-                .font(.system(size: 13))
-                .scrollContentBackground(.hidden)
+            TableAwareEditor(text: $model.text)
                 .padding(8)
                 .background(Color(nsColor: .textBackgroundColor))
                 .onChange(of: model.text) { _, _ in model.textChanged() }

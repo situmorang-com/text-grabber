@@ -1,13 +1,82 @@
-# TextGrabber
+<p align="center">
+  <img src="docs/media/icon.png" width="96" alt="TextGrabber icon">
+</p>
 
-A macOS menu bar app that copies text from anything on screen: select an area, and the text is on your clipboard.
+<h1 align="center">TextGrabber</h1>
 
-## Use
+<p align="center">
+  <b>Copy text from anything on your screen.</b><br>
+  Select an area and the text is on your clipboard: paragraphs, tables, emoji, QR links and all.<br>
+  A small macOS menu bar app that does everything on your Mac.
+</p>
 
-- **⌘⇧1** — select an area; the text is copied. Right-clicking the menu bar icon does the same.
-- Menu bar icon — capture the last area again, read a QR code or barcode, read an image on the clipboard, open an image or PDF, recent captures, settings.
-- Drop image or PDF files on the app icon to read them.
-- On first launch a setup window walks through the two permissions: Screen Recording (required; macOS applies it only after a restart, so the window offers a Restart button) and Accessibility (recommended, for exact emoji and symbols). It shows again whenever Screen Recording is missing, and from the menu with "Set Up TextGrabber…".
+<p align="center">
+  <img alt="macOS 14 or later" src="https://img.shields.io/badge/macOS-14%2B-111?logo=apple&logoColor=white">
+  <img alt="Swift" src="https://img.shields.io/badge/Swift-5.9-F05138?logo=swift&logoColor=white">
+  <img alt="Apple silicon and Intel" src="https://img.shields.io/badge/Apple%20silicon%20%2B%20Intel-universal-555">
+  <img alt="On-device" src="https://img.shields.io/badge/privacy-on--device-2E7D32">
+</p>
+
+<p align="center">
+  <img src="docs/media/demo.gif" width="820" alt="Selecting part of a window copies its text and table; selecting a QR code offers to open its link; the editor shows the captured table in columns">
+</p>
+
+## Features
+
+**Capture**
+- **One shortcut, anywhere.** Press ⇧⌘1, drag over anything on screen, and the text is copied. Shortcuts are yours to change.
+- **Capture the last area again**, keep every line break, or read the image on the clipboard.
+- **Scrolling capture** for text longer than the screen: scroll, and the pictures are joined without repeats.
+- **Images and PDFs**: drop them on the app icon, or open them from the menu.
+- **Every display**, Retina or not, including screens above or left of the main one.
+
+**Text that comes out right**
+- **Layout that reads like a person**: paragraphs joined, lists and headings kept, a sidebar read before the content beside it, hyphenated words repaired.
+- **Tables stay tables**, even with wrapped cells, and copy as tabs (paste into a spreadsheet), CSV or Markdown.
+- **Small text** is enlarged before reading, and unsure lines and empty table cells are read again on their own.
+- **Exact emoji and symbols** (👍 ✅ ⌘ ⇧): when you capture an app window, TextGrabber uses the app's own text wherever it matches what it read.
+- **Many languages**, detected automatically, with a main language and custom words you can set.
+
+**QR codes and barcodes**
+- **The same shortcut reads codes.** Aim at a code and you get its content; capture a page with a code and you get the text, then the link.
+- **A glass confirmation** shows the site a link goes to before you open it: **Text** ⌘C, **QR** ⌘L, **Both** ⎋, **Open Link** ⏎.
+
+**After a capture**
+- **Editor**: change line breaks and format, **translate** on this Mac (macOS 15+), or **clean up** misreads with Apple Intelligence (macOS 26+).
+- **History** of past captures with small pictures, pinning and search.
+- **Optional extras**: read the text aloud, add each capture to the previous ones, open a captured link.
+
+**Automation**
+- **Shortcuts and Siri** actions: capture text, read a QR code, extract text from images and PDFs.
+- **URL actions** (`textgrabber://capture`, …) for Raycast, Alfred and scripts, Raycast script commands, and a **command line** that reads files.
+
+**Private and light**
+- **Everything happens on your Mac**: recognition, translation and clean-up. Screenshots are read in memory and deleted at once.
+- **Light**: about 20 MB of memory while idle, and nothing running between captures.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/media/code-confirmation.png" width="400" alt="Glass confirmation for a QR code link"><br><sub>A QR code: check the site, then ⏎ to open</sub></td>
+    <td align="center"><img src="docs/media/confirmation.png" width="330" alt="Copied confirmation with a preview"><br><sub>Every capture is confirmed with a preview</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/media/editor.png" width="400" alt="Editor with a captured table in columns"><br><sub>The editor: line breaks, Markdown, CSV, translate, clean up</sub></td>
+    <td align="center"><img src="docs/media/settings.png" width="330" alt="Settings window"><br><sub>Settings</sub></td>
+  </tr>
+</table>
+
+## Getting started
+
+```sh
+./scripts/setup-signing.sh   # once: a local signing identity, so macOS permissions survive rebuilds
+./scripts/build-app.sh       # builds, installs to /Applications and starts it
+```
+
+On first launch a setup window walks through the two permissions: **Screen Recording** (required; macOS applies it after a restart, so the window offers a Restart button) and **Accessibility** (recommended, for exact emoji and symbols). It comes back whenever Screen Recording is missing, and from the menu with "Set Up TextGrabber…". Then press ⇧⌘1 anywhere. The menu bar icon has everything else.
+
+The README media is regenerated with `scripts/readme-media/make.sh` (demo content only; nothing from your screen).
 
 ## Reading windows and small text
 

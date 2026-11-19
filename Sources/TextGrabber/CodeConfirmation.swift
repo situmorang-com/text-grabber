@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// The confirmation for a capture that held a QR code or barcode: a frosted glass panel near the bottom of the
-/// screen. ↩ runs the main action (open the link), esc runs the escape action (copy both the text and the code).
+/// screen. ⏎ runs the main action (open the link), ⎋ the escape action (copy both), ⌘C and ⌘L the others.
 ///
 /// While it shows, it takes the keyboard without activating TextGrabber, so the app in front stays in front.
 /// Any other key closes it and goes on to that app, so typing or ⌘V right after a capture is not lost
@@ -10,7 +10,15 @@ import SwiftUI
 final class CodeConfirmation {
     struct Action {
         var title: String
+        /// ⌘ plus this key runs the action while the panel shows (secondary actions), e.g. "c" for ⌘C.
+        var commandKey: Character?
         var perform: () -> Void
+
+        init(title: String, commandKey: Character? = nil, perform: @escaping () -> Void) {
+            self.title = title
+            self.commandKey = commandKey
+            self.perform = perform
+        }
     }
 
     struct Content {
@@ -64,6 +72,11 @@ final class CodeConfirmation {
         panel.contentView = surface
         panel.onReturn = { [weak self] in self?.choose(.primary) }
         panel.onEscape = { [weak self] in self?.choose(.cancel) }
+        panel.onCommandKey = { [weak self] key in
+            guard let index = content.secondary.firstIndex(where: { $0.commandKey == key }) else { return false }
+            self?.choose(.secondary(index))
+            return true
+        }
         panel.onOtherKey = { [weak self] event in
             self?.close()
             // Hand the key to the app in front once the panel has let go of the keyboard.
@@ -133,6 +146,8 @@ private final class KeyPanel: NSPanel {
     var onReturn: (() -> Void)?
     var onEscape: (() -> Void)?
     var onOtherKey: ((NSEvent) -> Void)?
+    /// ⌘ plus a key; true when an action took it.
+    var onCommandKey: ((Character) -> Bool)?
 
     override var canBecomeKey: Bool { takesKeyboard }
 
@@ -141,7 +156,11 @@ private final class KeyPanel: NSPanel {
         switch Int(event.keyCode) {
         case 36, 76: onReturn?()      // return, keypad enter
         case 53: onEscape?()          // esc
-        default: onOtherKey?(event)
+        default:
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            if modifiers == .command, let key = event.charactersIgnoringModifiers?.lowercased().first,
+               onCommandKey?(key) == true { return }
+            onOtherKey?(event)
         }
     }
 }
@@ -244,18 +263,21 @@ private struct CodeConfirmationView: View {
 
             HStack(spacing: 8) {
                 ForEach(Array(content.secondary.enumerated()), id: \.offset) { index, action in
-                    Button(action.title) { choose(.secondary(index)) }.buttonStyle(GlassButton()).focusable(false)
+                    Button { choose(.secondary(index)) } label: {
+                        label(action.title, key: action.commandKey.map { "⌘" + String($0).uppercased() })
+                    }
+                    .buttonStyle(GlassButton()).focusable(false)
                 }
                 Spacer(minLength: 8)
                 if let escape = content.escape {
-                    Button { choose(.cancel) } label: { label(escape.title, key: "esc") }.buttonStyle(GlassButton()).focusable(false)
+                    Button { choose(.cancel) } label: { label(escape.title, key: "⎋") }.buttonStyle(GlassButton()).focusable(false)
                 }
-                Button { choose(.primary) } label: { label(content.primary.title, key: "↩") }
+                Button { choose(.primary) } label: { label(content.primary.title, key: "⏎") }
                     .buttonStyle(GlassButton(prominent: true)).focusable(false)
             }
         }
         .padding(18)
-        .frame(width: 540)
+        .frame(width: 480)
         // ↩ and esc belong to the panel; no button takes keyboard focus or draws a focus ring.
         .focusEffectDisabled()
         .onHover(perform: hovering)
@@ -272,10 +294,10 @@ private struct CodeConfirmationView: View {
     }
 
     @ViewBuilder
-    private func label(_ title: String, key: String) -> some View {
+    private func label(_ title: String, key: String?) -> some View {
         HStack(spacing: 6) {
             Text(title)
-            if keyHints {
+            if keyHints, let key {
                 Text(key)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .padding(.horizontal, 4)

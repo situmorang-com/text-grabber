@@ -94,14 +94,15 @@ final class ResultHandler {
     }
 
     /// The confirmation for a capture with codes. Whatever was copied first (the code, or the text and the code),
-    /// it offers: Copy Text Only, Copy Link (or Code) Only, esc for both on separate lines, and ↩ to open a link.
+    /// it offers: Text (⌘C), QR (⌘L), Both (⎋, on separate lines), and Open Link (⏎).
     /// A link never opens by itself (unless the "open links" setting says so).
     private func confirmCodes(_ offer: CodeOffer, copied: String, kind: ResultKind) {
         let links = offer.codes.compactMap(\.link)
         let link = links.count == 1 ? links.first : nil
         let name = offer.codes.count == 1 ? offer.codes[0].kind : "\(offer.codes.count) codes"
         let symbol = offer.codes.allSatisfy { $0.kind == "barcode" } ? "barcode" : "qrcode"
-        let codeWord = link != nil ? "Link" : offer.codes.count == 1 ? "Code" : "Codes"
+        // Short button names: "QR" for a QR code (link or not), "Barcode", "Codes" for several.
+        let codeWord = offer.codes.count > 1 ? "Codes" : offer.codes[0].kind == "QR code" ? "QR" : offer.codes[0].kind.uppercasedFirst
         // Both, each on its own lines: the text, then every code it does not already contain.
         let extra = CodeTriage.codes(notIn: offer.textOnly, offer.codes)
         let both = offer.textOnly.isEmpty ? offer.codesOnly
@@ -120,10 +121,10 @@ final class ResultHandler {
         var escape: CodeConfirmation.Action?
         if !offer.textOnly.isEmpty {
             secondary = [
-                .init(title: "Copy Text Only") { copy(offer.textOnly, .text, "Copied the text only") },
-                .init(title: "Copy \(codeWord) Only") { copy(offer.codesOnly, .barcode, "Copied the \(codeWord.lowercased()) only") },
+                .init(title: "Text", commandKey: "c") { copy(offer.textOnly, .text, "Copied the text only") },
+                .init(title: codeWord, commandKey: "l") { copy(offer.codesOnly, .barcode, "Copied the \(name.lowercasedFirst) only") },
             ]
-            escape = .init(title: "Copy Both") { copy(both, .text, "Copied the text and the \(codeWord.lowercased())") }
+            escape = .init(title: "Both") { copy(both, .text, "Copied the text and the \(name.lowercasedFirst)") }
         }
         let primary = link.map { url in CodeConfirmation.Action(title: "Open Link") { NSWorkspace.shared.open(url) } }
             ?? CodeConfirmation.Action(title: "Done") {}

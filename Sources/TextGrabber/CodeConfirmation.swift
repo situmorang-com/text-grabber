@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// The confirmation for a capture that held a QR code or barcode: a frosted glass panel near the bottom of the
-/// screen. ↩ runs the main action (open the link), esc cancels (what was copied stays copied).
+/// screen. ↩ runs the main action (open the link), esc runs the escape action (copy both the text and the code).
 ///
 /// While it shows, it takes the keyboard without activating TextGrabber, so the app in front stays in front.
 /// Any other key closes it and goes on to that app, so typing or ⌘V right after a capture is not lost
@@ -23,7 +23,8 @@ final class CodeConfirmation {
         /// A link shown as its own row under the text (text and code captures).
         var linkRow: String?
         var primary: Action
-        var showsCancel = true
+        /// Run by esc and shown as a button with an "esc" hint; nil: esc only closes.
+        var escape: Action?
         var secondary: [Action] = []
     }
 
@@ -103,7 +104,7 @@ final class CodeConfirmation {
         self.content = nil
         switch choice {
         case .primary: content.primary.perform()
-        case .cancel: break
+        case .cancel: content.escape?.perform()
         case .secondary(let index): if content.secondary.indices.contains(index) { content.secondary[index].perform() }
         }
     }
@@ -245,16 +246,16 @@ private struct CodeConfirmationView: View {
                 ForEach(Array(content.secondary.enumerated()), id: \.offset) { index, action in
                     Button(action.title) { choose(.secondary(index)) }.buttonStyle(GlassButton()).focusable(false)
                 }
-                Spacer(minLength: 12)
-                if content.showsCancel {
-                    Button { choose(.cancel) } label: { label("Cancel", key: "esc") }.buttonStyle(GlassButton()).focusable(false)
+                Spacer(minLength: 8)
+                if let escape = content.escape {
+                    Button { choose(.cancel) } label: { label(escape.title, key: "esc") }.buttonStyle(GlassButton()).focusable(false)
                 }
                 Button { choose(.primary) } label: { label(content.primary.title, key: "↩") }
                     .buttonStyle(GlassButton(prominent: true)).focusable(false)
             }
         }
         .padding(18)
-        .frame(width: 460)
+        .frame(width: 540)
         // ↩ and esc belong to the panel; no button takes keyboard focus or draws a focus ring.
         .focusEffectDisabled()
         .onHover(perform: hovering)
@@ -292,6 +293,8 @@ private struct GlassButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: prominent ? .semibold : .medium))
+            .lineLimit(1)
+            .fixedSize()
             .foregroundStyle(prominent ? Color.white : Color.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)

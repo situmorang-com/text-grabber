@@ -93,49 +93,58 @@ final class ResultHandler {
         }
     }
 
-    /// The confirmation for a capture with codes. A link opens with ↩ or a click, never by itself (unless the
-    /// "open links" setting says so); esc leaves what was copied. The other buttons switch the clipboard to the
-    /// text only or the codes only.
+    /// The confirmation for a capture with codes. Whatever was copied first (the code, or the text and the code),
+    /// it offers: Copy Text Only, Copy Link (or Code) Only, esc for both on separate lines, and ↩ to open a link.
+    /// A link never opens by itself (unless the "open links" setting says so).
     private func confirmCodes(_ offer: CodeOffer, copied: String, kind: ResultKind) {
         let links = offer.codes.compactMap(\.link)
         let link = links.count == 1 ? links.first : nil
         let name = offer.codes.count == 1 ? offer.codes[0].kind : "\(offer.codes.count) codes"
         let symbol = offer.codes.allSatisfy { $0.kind == "barcode" } ? "barcode" : "qrcode"
+        let codeWord = link != nil ? "Link" : offer.codes.count == 1 ? "Code" : "Codes"
+        // Both, each on its own lines: the text, then every code it does not already contain.
+        let extra = CodeTriage.codes(notIn: offer.textOnly, offer.codes)
+        let both = offer.textOnly.isEmpty ? offer.codesOnly
+            : extra.isEmpty ? offer.textOnly : offer.textOnly + "\n\n" + CodeTriage.codesText(extra)
+
         var current = copied
-        let swap = { [weak self] (new: String, newKind: ResultKind, message: String) in
+        let copy = { [weak self] (new: String, newKind: ResultKind, message: String) in
             guard let self else { return }
-            self.replaceCopied(current, with: new, kind: newKind)
-            current = new
+            if new != current {
+                self.replaceCopied(current, with: new, kind: newKind)
+                current = new
+            }
             self.hud.show(symbol: "checkmark.circle.fill", title: message, detail: self.preview(new))
         }
-        let open = link.map { url in CodeConfirmation.Action(title: "Open Link") { NSWorkspace.shared.open(url) } }
-        let done = CodeConfirmation.Action(title: "Done") {}
+        var secondary: [CodeConfirmation.Action] = []
+        var escape: CodeConfirmation.Action?
+        if !offer.textOnly.isEmpty {
+            secondary = [
+                .init(title: "Copy Text Only") { copy(offer.textOnly, .text, "Copied the text only") },
+                .init(title: "Copy \(codeWord) Only") { copy(offer.codesOnly, .barcode, "Copied the \(codeWord.lowercased()) only") },
+            ]
+            escape = .init(title: "Copy Both") { copy(both, .text, "Copied the text and the \(codeWord.lowercased())") }
+        }
+        let primary = link.map { url in CodeConfirmation.Action(title: "Open Link") { NSWorkspace.shared.open(url) } }
+            ?? CodeConfirmation.Action(title: "Done") {}
 
-        var content: CodeConfirmation.Content
-        switch offer.choice {
-        case .textAndCodes:
+        let content: CodeConfirmation.Content
+        if offer.choice == .textAndCodes {
             let lines = offer.textOnly.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
             let rest = lines.dropFirst().joined(separator: " ")
             content = CodeConfirmation.Content(
                 symbol: symbol, caption: "Text and \(name.lowercasedFirst) copied",
                 title: lines.first ?? "", detail: rest.isEmpty ? nil : rest,
                 linkRow: link?.absoluteString ?? offer.codesOnly.replacingOccurrences(of: "\n", with: "  ·  "),
-                primary: open ?? done, showsCancel: open != nil,
-                secondary: [
-                    .init(title: "Text Only") { swap(offer.textOnly, .text, "Copied the text only") },
-                    .init(title: offer.codes.count == 1 ? "Code Only" : "Codes Only") { swap(offer.codesOnly, .barcode, "Copied the code only") },
-                ])
-        default:
+                primary: primary, escape: escape, secondary: secondary)
+        } else {
             content = CodeConfirmation.Content(
                 symbol: symbol,
                 caption: link != nil ? "Link from \(name.lowercasedFirst) copied" : "\(name.uppercasedFirst) copied",
                 // The site in large type: it is what to check before opening a link from a code.
                 title: link?.host ?? offer.codesOnly, titleIsCode: link == nil,
                 detail: link?.absoluteString,
-                primary: open ?? done, showsCancel: open != nil)
-            if !offer.textOnly.isEmpty {
-                content.secondary = [.init(title: "Copy the Text Instead") { swap(offer.textOnly, .text, "Copied the text") }]
-            }
+                primary: primary, escape: escape, secondary: secondary)
         }
         codeConfirmation.show(content)
     }

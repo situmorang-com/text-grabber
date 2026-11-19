@@ -94,7 +94,7 @@ final class ResultHandler {
     }
 
     /// The confirmation for a capture with codes. Whatever was copied first (the code, or the text and the code),
-    /// it offers: Text (⌘C), QR (⌘L), Both (⎋, on separate lines), and Open Link (⏎).
+    /// it offers: Text (⌘C), QR (⌘L), Both (⎋, on separate lines), and Open Link (⏎), which copies both too.
     /// A link never opens by itself (unless the "open links" setting says so).
     private func confirmCodes(_ offer: CodeOffer, copied: String, kind: ResultKind) {
         let links = offer.codes.compactMap(\.link)
@@ -126,8 +126,13 @@ final class ResultHandler {
             ]
             escape = .init(title: "Both") { copy(both, .text, "Copied the text and the \(name.lowercasedFirst)") }
         }
-        let primary = link.map { url in CodeConfirmation.Action(title: "Open Link") { NSWorkspace.shared.open(url) } }
-            ?? CodeConfirmation.Action(title: "Done") {}
+        // Opening the link also leaves both the text and the link on the clipboard.
+        let primary = link.map { url in
+            CodeConfirmation.Action(title: "Open Link") {
+                if !offer.textOnly.isEmpty { copy(both, .text, "Copied the text and the \(name.lowercasedFirst)") }
+                NSWorkspace.shared.open(url)
+            }
+        } ?? CodeConfirmation.Action(title: "Done") {}
 
         let content: CodeConfirmation.Content
         if offer.choice == .textAndCodes {

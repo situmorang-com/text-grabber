@@ -23,6 +23,8 @@ public struct RecognitionOptions {
     public var retryUncertainLines = true
     /// Group lines into paragraphs and table cells with Apple's document recognition (macOS 26 and later).
     public var useDocumentStructure = true
+    /// Also look for QR codes and barcodes, in parallel with the text (`RecognitionResult.codes`).
+    public var readCodes = false
 
     public init() {}
 
@@ -42,6 +44,8 @@ public struct RecognitionResult {
     public var upscaled: Bool
     /// Paragraphs and tables, when document recognition was available and found any.
     public var structure: DocumentStructure?
+    /// QR codes and barcodes, when `RecognitionOptions.readCodes` was set.
+    public var codes: [FoundCode] = []
 }
 
 public enum RecognitionError: LocalizedError {
@@ -102,6 +106,15 @@ public enum Recognizer {
 
     /// The Vision part only: safe to run off the main thread. `text` is left empty.
     public static func readFragments(in image: CGImage, options: RecognitionOptions = .init()) throws -> RecognitionResult {
+        // Codes are read from the original image while the text is read: about 0.15 s, so it adds no wait.
+        final class Found: @unchecked Sendable { var codes: [FoundCode] = [] }   // written once, read after wait()
+        let found = Found()
+        let codesRead = DispatchGroup()
+        if options.readCodes {
+            DispatchQueue.global(qos: .userInitiated).async(group: codesRead) {
+                found.codes = (try? readCodes(in: image)) ?? []
+            }
+        }
         var working = image
         var upscaled = false
         // A small capture is enlarged before the first pass: at its own size, isolated characters go missing.
@@ -133,19 +146,24 @@ public enum Recognizer {
             fragments = (try? fragmentsOrNil(in: working, level: .fast, options: options)) ?? []
         }
 
+        codesRead.wait()
+        let codes = found.codes
         if options.retryUncertainLines {
-            fragments = retryUncertain(fragments, in: working, options: options)
+            // What was read inside a code is its squares, not text: not worth a second reading.
+            fragments = retryUncertain(fragments, in: working, options: options,
+                                       skip: { box in codes.contains { CodeTriage.share(of: box, inside: $0.box) > 0.5 } })
         }
         let structure = options.useDocumentStructure && !fragments.isEmpty ? readStructure(in: working) : nil
-        return RecognitionResult(text: "", fragments: fragments, pass: pass, upscaled: upscaled, structure: structure)
+        return RecognitionResult(text: "", fragments: fragments, pass: pass, upscaled: upscaled, structure: structure, codes: codes)
     }
 
     /// Vision marks a line it struggled with (small or faint text, sometimes read upside-down) with low confidence.
     /// Such a line usually reads correctly on its own, enlarged; keep whichever reading Vision trusts more.
-    static func retryUncertain(_ fragments: [TextFragment], in image: CGImage, options: RecognitionOptions) -> [TextFragment] {
+    static func retryUncertain(_ fragments: [TextFragment], in image: CGImage, options: RecognitionOptions,
+                               skip: (CGRect) -> Bool = { _ in false }) -> [TextFragment] {
         var result = fragments
         var retries = 0
-        for index in result.indices where result[index].confidence <= 0.5 && retries < 12 {
+        for index in result.indices where result[index].confidence <= 0.5 && retries < 12 && !skip(result[index].box) {
             retries += 1
             let box = result[index].box
             let width = CGFloat(image.width), height = CGFloat(image.height)
@@ -230,18 +248,24 @@ public enum Recognizer {
 
     /// Payloads of every QR code and barcode, in reading order, without duplicates.
     public static func readBarcodes(in image: CGImage) throws -> [String] {
+        try readCodes(in: image).map(\.payload)
+    }
+
+    /// Every QR code and barcode with where it is, in reading order, without duplicate payloads.
+    public static func readCodes(in image: CGImage) throws -> [FoundCode] {
         let request = VNDetectBarcodesRequest()
         try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
-        let found = (request.results ?? [])
-            .sorted { a, b in
-                // Vision's origin is bottom-left: larger y is higher on screen.
-                abs(a.boundingBox.midY - b.boundingBox.midY) > 0.02
-                    ? a.boundingBox.midY > b.boundingBox.midY
-                    : a.boundingBox.minX < b.boundingBox.minX
-            }
-            .compactMap(\.payloadStringValue)
+        let found = (request.results ?? []).compactMap { observation -> FoundCode? in
+            guard let payload = observation.payloadStringValue, !payload.isEmpty else { return nil }
+            let box = observation.boundingBox   // bottom-left origin
+            return FoundCode(payload: payload, box: CGRect(x: box.minX, y: 1 - box.maxY, width: box.width, height: box.height),
+                             kind: FoundCode.name(of: observation.symbology))
+        }
+        .sorted { a, b in
+            abs(a.box.midY - b.box.midY) > 0.02 ? a.box.midY < b.box.midY : a.box.minX < b.box.minX
+        }
         var seen = Set<String>()
-        return found.filter { seen.insert($0).inserted }
+        return found.filter { seen.insert($0.payload).inserted }
     }
 
     // MARK: Files
@@ -315,6 +339,15 @@ public enum ImagePrep {
 }
 
 public enum Dictionary {
+    /// Like `isWord`, but short pieces are checked too: "nt" (from "plant", cut by a selection) is not a word.
+    public static func isWholeWord(_ word: String) -> Bool {
+        guard word.count > 1 else { return true }
+        let checker = NSSpellChecker.shared
+        let range = checker.checkSpelling(of: word, startingAt: 0, language: nil, wrap: false,
+                                          inSpellDocumentWithTag: 0, wordCount: nil)
+        return range.location == NSNotFound
+    }
+
     /// True when the system spelling dictionary knows the word.
     public static func isWord(_ word: String) -> Bool {
         guard word.count > 2 else { return true }

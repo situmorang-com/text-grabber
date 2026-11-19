@@ -195,19 +195,24 @@ final class CaptureController {
         DispatchQueue.global(qos: .userInitiated).async {
             switch kind {
             case .barcode:
-                let payloads = images.flatMap { (try? Recognizer.readBarcodes(in: $0)) ?? [] }
+                let codes = images.flatMap { (try? Recognizer.readCodes(in: $0)) ?? [] }
                 DispatchQueue.main.async {
                     self.isBusy = false
-                    self.output.deliver(payloads.joined(separator: "\n"), kind: .barcode, picture: images.first)
+                    let text = CodeTriage.codesText(codes)
+                    self.output.deliver(text, kind: .barcode, picture: images.first,
+                                        codes: codes.isEmpty ? nil : CodeOffer(choice: .codesOnly, codes: codes, textOnly: "", codesOnly: text))
                 }
             case .scrolling:
                 // Started from the selection instead (see captureScreen); a file or clipboard image is read normally.
                 DispatchQueue.main.async { self.isBusy = false }
                 self.recognise(images, kind: .text(nil), screenRect: screenRect, probe: probe)
             case .text(let override):
-                let options = Prefs.recognitionOptions(lineMode: override)
+                var options = Prefs.recognitionOptions(lineMode: override)
+                // One picture (a screen area, the clipboard, an image file): it may be about a QR code or barcode.
+                options.readCodes = images.count == 1 && Prefs.bool(Prefs.Key.readCodes)
                 var pages: [[TextFragment]] = []
                 var structures: [DocumentStructure?] = []
+                var codes: [FoundCode] = []
                 var failure: Error?
                 var exactLines = 0
                 var report = ""
@@ -219,6 +224,7 @@ final class CaptureController {
                         let result = try Recognizer.readFragments(in: image, options: options)
                         pages.append(result.fragments)
                         structures.append(result.structure)
+                        codes += result.codes
                     } catch { failure = error }
                 }
                 // A screen capture of a real window: swap in the app's own text where it lines up (emoji, symbols).
@@ -230,15 +236,35 @@ final class CaptureController {
                 }
                 DispatchQueue.main.async {
                     self.isBusy = false
-                    // Layout uses the spelling dictionary, which belongs on the main thread.
+                    // Layout and the code decision use the spelling dictionary, which belongs on the main thread.
+                    var decision: CodeTriage.Decision?
+                    if !codes.isEmpty, pages.count == 1 {
+                        let decided = CodeTriage(isWord: Dictionary.isWholeWord).decide(fragments: pages[0], codes: codes)
+                        pages[0] = decided.fragments
+                        report += decided.report
+                        decision = decided
+                    }
                     let structured = StructuredText(zip(pages, structures).flatMap { page, structure in
                         Recognizer.compose(page, structure: structure, options: options).blocks
                     })
-                    let text = structured.render(OutputFormat.format, tables: OutputFormat.tableStyle)
+                    var text = structured.render(OutputFormat.format, tables: OutputFormat.tableStyle)
+                    var offer: CodeOffer?
+                    var result = CaptureResult(pages: pages, structures: structures, options: options, kind: .text)
+                    if let decision {
+                        let textOnly = text
+                        text = CodeTriage.clipboard(text: textOnly, decision: decision)
+                        offer = CodeOffer(choice: decision.choice, codes: codes, textOnly: textOnly,
+                                          codesOnly: CodeTriage.codesText(codes))
+                        if decision.choice == .codesOnly {
+                            result = .fixed(text, kind: .barcode)
+                        } else {
+                            result.appendix = CodeTriage.codesText(CodeTriage.codes(notIn: textOnly, codes))
+                        }
+                    }
                     if let structure = structures.first ?? nil {
                         report += "document structure: \(structure.paragraphs.count) paragraphs, \(structure.tables.count) tables\n"
                     }
-                    if !report.isEmpty || probe {
+                    if !report.isEmpty || probe || decision != nil {
                         report += "lines recognised: \(pages.reduce(0) { $0 + $1.count })\n"
                         AccessibilityText.writeLog(report + "\ntext delivered (\(options.lineMode.rawValue)):\n" + text + "\n")
                     }
@@ -246,9 +272,9 @@ final class CaptureController {
                     if text.isEmpty, let failure {
                         self.output.fail("Text recognition failed", detail: failure.localizedDescription)
                     } else {
-                        self.output.deliver(text, kind: .text, note: exactLines > 0 ? "exact text from the app" : self.accessHint(screenRect),
-                                            result: CaptureResult(pages: pages, structures: structures, options: options, kind: .text),
-                                            picture: images.first)
+                        self.output.deliver(text, kind: decision?.choice == .codesOnly ? .barcode : .text,
+                                            note: exactLines > 0 ? "exact text from the app" : self.accessHint(screenRect),
+                                            result: result, picture: images.first, codes: offer)
                     }
                 }
             }

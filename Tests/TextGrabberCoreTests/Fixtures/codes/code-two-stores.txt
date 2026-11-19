@@ -1,0 +1,2 @@
+https://example.com/app/ios
+https://example.com/app/android

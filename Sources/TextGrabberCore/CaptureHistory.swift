@@ -61,6 +61,16 @@ public final class CaptureHistory: ObservableObject {
         save()
     }
 
+    /// The newest entry with this text gets new text, keeping its date, picture and pin: for a capture whose
+    /// clipboard text was changed afterwards ("copy only the code").
+    public func replaceText(_ old: String, with new: String) {
+        guard old != new, let id = entries.first(where: { $0.text == old })?.id else { return }
+        if let duplicate = entries.first(where: { $0.text == new && $0.id != id }) { discard(duplicate) }
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[index].text = new
+        save()
+    }
+
     public func setPinned(_ entry: HistoryEntry, _ pinned: Bool) {
         guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         entries[index].pinned = pinned

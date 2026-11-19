@@ -27,6 +27,7 @@ enum Prefs {
         static let openEditor = "openEditorAfterCapture"
         static let historyPictures = "historyPictures"
         static let setupDone = "setupDone"
+        static let readCodes = "readCodesInTextCaptures"
     }
 
     static let defaults = UserDefaults.standard
@@ -54,6 +55,7 @@ enum Prefs {
             Key.openEditor: false,
             Key.historyPictures: true,
             Key.setupDone: false,
+            Key.readCodes: true,
         ])
     }
 

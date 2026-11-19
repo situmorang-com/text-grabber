@@ -13,6 +13,8 @@ struct CaptureResult {
     var kind: ResultKind
     /// Set when the result is not from recognition (a barcode, or text from history): it cannot be laid out again.
     var fixedText: String?
+    /// Added after the text whatever the layout: the content of QR codes and barcodes found beside it.
+    var appendix: String?
 
     static func fixed(_ text: String, kind: ResultKind) -> CaptureResult {
         CaptureResult(pages: [], structures: [], options: RecognitionOptions(), kind: kind, fixedText: text)
@@ -22,9 +24,11 @@ struct CaptureResult {
         if let fixedText { return StructuredText(plain: fixedText) }
         var options = options
         options.lineMode = lineMode
-        return StructuredText(zip(pages, structures).flatMap { page, structure in
+        var blocks = zip(pages, structures).flatMap { page, structure in
             Recognizer.compose(page, structure: structure, options: options).blocks
-        })
+        }
+        if let appendix, !appendix.isEmpty { blocks.append(.text(appendix, spaced: true)) }
+        return StructuredText(blocks)
     }
 }
 

@@ -1,0 +1,13 @@
+Invoice INV-20418
+
+Billed to: Northwind Traders
+Issued: 18 November 2026
+Due: 2 December 2026
+
+Design workshop, two days
+Travel and materials
+Total due: EUR 2,450.00
+
+Pay online with the code or by bank transfer to the account on page two.
+
+https://pay.example.com/i/20418

@@ -9,7 +9,8 @@ enum CommandLineTool {
       --mode keep|paragraphs|single   How lines are joined (default: paragraphs)
       --lang <code>                   Preferred language, e.g. en-US, id-ID, ja-JP
       --words "a, b c"                Custom words, comma-separated
-      --barcode                       Read QR codes and barcodes instead of text
+      --barcode                       Read only QR codes and barcodes
+      --no-codes                      Read only text (by default a capture that is about a code gives the code)
       --no-upscale                    Do not enlarge small images first
       --scale <n>                     Enlarge by exactly n before reading (experiments)
       --no-retry                      Do not re-read uncertain lines from an enlarged crop
@@ -25,6 +26,7 @@ enum CommandLineTool {
 
     static func run(_ arguments: [String]) async -> Int32 {
         var options = RecognitionOptions()
+        options.readCodes = true
         var files: [String] = []
         var barcode = false, debug = false
         var format = StructuredText.Format.plain
@@ -44,6 +46,7 @@ enum CommandLineTool {
             case "--lang": options.preferredLanguage = iterator.next()
             case "--words": options.customWords = RecognitionOptions.parseCustomWords(iterator.next() ?? "")
             case "--barcode": barcode = true
+            case "--no-codes": options.readCodes = false
             case "--no-upscale": options.upscaleSmallImages = false
             case "--scale": options.forcedScale = Double(iterator.next() ?? "").map { CGFloat($0) }
             case "--no-retry": options.retryUncertainLines = false
@@ -85,14 +88,20 @@ enum CommandLineTool {
                         outputs.append(contentsOf: try Recognizer.readBarcodes(in: image))
                     } else {
                         var result = try Recognizer.readFragments(in: image, options: options)
-                        result.text = Recognizer.compose(result.fragments, structure: result.structure, options: options)
+                        let decision = CodeTriage(isWord: Dictionary.isWholeWord).decide(fragments: result.fragments, codes: result.codes)
+                        let text = Recognizer.compose(decision.fragments, structure: result.structure, options: options)
                             .render(format, tables: tableStyle)
+                        result.text = CodeTriage.clipboard(text: text, decision: decision)
                         if debug {
                             FileHandle.standardError.write(Data("pass=\(result.pass) upscaled=\(result.upscaled) fragments=\(result.fragments.count) structure=\(result.structure.map { "\($0.paragraphs.count) paragraphs, \($0.tables.count) tables" } ?? "none")\n".utf8))
                             if let structure = result.structure {
                                 for p in structure.paragraphs { FileHandle.standardError.write(Data(String(format: "  paragraph [%.3f %.3f %.3f %.3f]\n", p.minX, p.minY, p.width, p.height).utf8)) }
                                 for t in structure.tables { FileHandle.standardError.write(Data(String(format: "  table [%.3f %.3f %.3f %.3f] %d rows\n", t.box.minX, t.box.minY, t.box.width, t.box.height, t.cells.count).utf8)) }
                             }
+                            for code in result.codes {
+                                FileHandle.standardError.write(Data(String(format: "  CODE [%.3f %.3f %.3f %.3f] %@: %@\n", code.box.minX, code.box.minY, code.box.width, code.box.height, code.kind, code.payload).utf8))
+                            }
+                            if !decision.report.isEmpty { FileHandle.standardError.write(Data(decision.report.utf8)) }
                             for fragment in result.fragments {
                                 let box = fragment.box
                                 FileHandle.standardError.write(Data(String(format: "  [%.3f %.3f %.3f %.3f] conf %.2f  %@\n", box.minX, box.minY, box.width, box.height, fragment.confidence, fragment.text).utf8))

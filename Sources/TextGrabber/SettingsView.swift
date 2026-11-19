@@ -76,6 +76,7 @@ private struct RecognitionSettings: View {
     @AppStorage(Prefs.Key.detectColumns) private var detectColumns = true
     @AppStorage(Prefs.Key.detectTables) private var detectTables = true
     @AppStorage(Prefs.Key.exactText) private var exactText = true
+    @AppStorage(Prefs.Key.readCodes) private var readCodes = true
     @AppStorage(Prefs.Key.outputFormat) private var outputFormat = StructuredText.Format.plain.rawValue
     @AppStorage(Prefs.Key.tableStyle) private var tableStyle = StructuredText.TableStyle.tabs.rawValue
     @State private var accessibilityGranted = AccessibilityText.isTrusted
@@ -113,7 +114,12 @@ private struct RecognitionSettings: View {
                 }
                 Toggle("Also detect other languages automatically", isOn: $detectsLanguage)
             }
-            Section("Accuracy") {
+            Section("QR codes and barcodes") {
+                Toggle("Read codes in text captures", isOn: $readCodes)
+                Text("A capture that is about a code copies what the code contains; a page with a code copies its text and then the code. The confirmation can switch between them, and opens links only when you click Open.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+                        Section("Accuracy") {
                 Toggle("Use the app's own text when it matches (emoji, ⌘ and other symbols)", isOn: $exactText)
                 if exactText {
                     HStack {

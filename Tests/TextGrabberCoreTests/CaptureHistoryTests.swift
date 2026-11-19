@@ -61,4 +61,13 @@ final class CaptureHistoryTests: XCTestCase {
         XCTAssertEqual(history.entries.map(\.text), ["old capture"])
         XCTAssertFalse(history.entries[0].pinned)
     }
+
+    func testReplacingTheTextKeepsThePictureAndPersists() {
+        let history = CaptureHistory(folder: folder)
+        history.add("Poster text\n\nhttps://example.org/r", kind: "text", picture: picture())
+        history.replaceText("Poster text\n\nhttps://example.org/r", with: "https://example.org/r")
+        XCTAssertEqual(history.entries.map(\.text), ["https://example.org/r"])
+        XCTAssertNotNil(history.thumbnailURL(history.entries[0]))
+        XCTAssertEqual(CaptureHistory(folder: folder).entries.map(\.text), ["https://example.org/r"])
+    }
 }

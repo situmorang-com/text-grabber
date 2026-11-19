@@ -17,6 +17,15 @@ A macOS menu bar app that copies text from anything on screen: select an area, a
 - Small text is enlarged before reading, based on the height of the letters. This matters most on non-Retina displays.
 - A line recognition was unsure about is read a second time from an enlarged crop; this catches small text that would otherwise come back upside-down.
 
+## QR codes and barcodes
+
+The normal capture shortcut reads codes too; no separate shortcut is needed.
+
+- **Capturing a code** (with a caption such as "Scan me", the link printed under it, or bits of text the selection cut through): the clipboard gets what the code contains.
+- **Capturing a page that has a code** (a poster, an invoice, a sign-in card): the clipboard gets the text, a blank line, then the code's content, unless the text already contains it.
+
+Text read inside a code, lines cut by the edge of the selection, text that repeats the code and fragments that are not words do not count; when fewer than 8 words are left, the capture is about the code. The confirmation shows what was decided and has buttons to switch: **Text Only**, **Code Only** or **Copy the Text Instead**. A link opens only when you click **Open**, which names the site it goes to (or automatically, if "Open the link when the capture is a single link" is on). Settings → Recognition can turn code reading off; "Read QR Code or Barcode" in the menu still reads codes only.
+
 ## Scrolling capture
 
 For text longer than the screen: choose "Scrolling Capture…" (menu, a shortcut you set, or `textgrabber://capture-scrolling`), select the area, then scroll through the content. A small panel above the area counts the pictures taken; press Done there, or the same shortcut again, at the end. Pictures are joined by matching the lines they share, so nothing is repeated; if you scroll so fast that two pictures share no line, the confirmation says text may be missing.
@@ -59,6 +68,7 @@ Run `./scripts/setup-signing.sh` once before the first build. It creates a self-
 
 - `LayoutEngineTests`: the layout rules on synthetic fragments.
 - `CaptureCorpusTests`: real recognition on every image in `Tests/TextGrabberCoreTests/Fixtures/captures`, compared with the text file beside it. Add real screenshots there; see its README.
+- `CodeTriageTests`: the code-or-text decision, and real recognition on every capture in `Fixtures/codes` (drawn by `scripts/make-code-fixtures.swift`).
 - `ExactTextTests`: restoring emoji and symbols from an app's text, using misreads Apple's recognition really produced.
 
 The first run in a fresh build can take about a minute while macOS prepares the recognition models; later runs take about a second.
@@ -80,7 +90,7 @@ URL actions, for Shortcuts ("Open URL"), Raycast, Alfred or scripts:
 | `textgrabber://capture-scrolling` | Start a scrolling capture, or finish the one running |
 | `textgrabber://capture-last-area` | Capture the last area again |
 | `textgrabber://capture-keep-lines` | Capture text, keeping line breaks |
-| `textgrabber://read-code` | Read a QR code or barcode |
+| `textgrabber://read-code` | Read only QR codes and barcodes (the normal capture reads them too) |
 | `textgrabber://clipboard` | Read the image on the clipboard |
 | `textgrabber://open?path=/abs/file.png` | Read files (repeat `path` for several) |
 | `textgrabber://edit-last` | Reopen the last capture in the editor |
@@ -107,6 +117,7 @@ The same binary reads files when given arguments:
 |---|---|
 | `Sources/TextGrabberCore/LayoutEngine.swift` | Turns OCR fragments into text: reading order, columns, tables, paragraphs, hyphenation |
 | `Sources/TextGrabberCore/Recognizer.swift` | Vision text and barcode recognition, image upscaling, PDF pages |
+| `Sources/TextGrabberCore/CodeTriage.swift` | Whether a capture with a code is about the code or about the text around it |
 | `Sources/TextGrabberCore/DocumentLayout.swift` | Lays recognised lines out with Apple's paragraph and table structure |
 | `Sources/TextGrabberCore/StructuredText.swift` | Text as blocks and tables; writes plain text, Markdown, CSV |
 | `Sources/TextGrabberCore/ExactText.swift` | Matches recognised lines against an app's real text to restore emoji and symbols |

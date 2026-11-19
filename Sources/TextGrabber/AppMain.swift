@@ -101,7 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             capture.captureScreen(.text(nil), probeRect: rect)
         case "snapshot":
             // textgrabber://snapshot?window=setup|settings|history|editor: opens it, then draws it to a PNG.
-            // It does not take focus from the app the user is in, and closes the window again if it was closed.
+            // It does not take focus from the app the user is in, and closes the window again if it was closed,
+            // unless keep=1 (to screenshot the real window; textgrabber://hide?window=… closes it after).
             let name = value("window") ?? "setup"
             let wasOpen = WindowSnapshot.window(named: name) != nil
             WindowSnapshot.isTaking = true
@@ -115,8 +116,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             WindowSnapshot.isTaking = false
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 WindowSnapshot.write(name: name)
-                if !wasOpen { WindowSnapshot.window(named: name)?.orderOut(nil) }
+                if !wasOpen, value("keep") != "1" { WindowSnapshot.window(named: name)?.orderOut(nil) }
             }
+        case "hide":
+            WindowSnapshot.window(named: value("window") ?? "")?.orderOut(nil)
         default:
             output.editNext = false
         }

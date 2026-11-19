@@ -1,0 +1,6 @@
+Sync is now twice as fast, and shared folders keep their colours on every device. Offline edits are merged the moment you reconnect.
+
+Plan	Price	Devices
+Basic	Free	2
+Plus	€4 / month	5
+Team	€9 / user	Unlimited

@@ -154,7 +154,43 @@ public enum Recognizer {
                                        skip: { box in codes.contains { CodeTriage.share(of: box, inside: $0.box) > 0.5 } })
         }
         let structure = options.useDocumentStructure && !fragments.isEmpty ? readStructure(in: working) : nil
+        if let structure, !structure.tables.isEmpty {
+            fragments += readEmptyCells(fragments, structure: structure, in: working, options: options)
+        }
         return RecognitionResult(text: "", fragments: fragments, pass: pass, upscaled: upscaled, structure: structure, codes: codes)
+    }
+
+    /// A table cell with nothing read in it, read again on its own. Measured: Vision skipped a lone "5" in a
+    /// table (the "2" above it was read), and read the cell alone at every scale from 1x to 4x.
+    static func readEmptyCells(_ fragments: [TextFragment], structure: DocumentStructure, in image: CGImage,
+                               options: RecognitionOptions) -> [TextFragment] {
+        let width = CGFloat(image.width), height = CGFloat(image.height)
+        var found: [TextFragment] = []
+        var budget = 24   // a large, mostly empty grid should not cost seconds
+        for cell in structure.tables.flatMap({ $0.cells.flatMap { $0 } }) where budget > 0 {
+            // By word: one recognised line can run across two cells ("Basic Free for everyone"), and both are taken.
+            let occupied = fragments.contains { fragment in
+                (fragment.wordBoxes.isEmpty ? [fragment.box] : fragment.wordBoxes)
+                    .contains { cell.contains(CGPoint(x: $0.midX, y: $0.midY)) }
+            }
+            guard !occupied else { continue }
+            budget -= 1
+            let pixels = CGRect(x: cell.minX * width, y: cell.minY * height, width: cell.width * width, height: cell.height * height)
+                .intersection(CGRect(x: 0, y: 0, width: width, height: height)).integral
+            guard pixels.width >= 8, pixels.height >= 8, let crop = image.cropping(to: pixels),
+                  let lines = try? fragmentsOrNil(in: crop, level: .accurate, options: options) else { continue }
+            for var line in lines where !line.text.trimmingCharacters(in: .whitespaces).isEmpty {
+                // From the cell's coordinates back to the whole picture's.
+                let map = { (box: CGRect) in
+                    CGRect(x: (pixels.minX + box.minX * pixels.width) / width, y: (pixels.minY + box.minY * pixels.height) / height,
+                           width: box.width * pixels.width / width, height: box.height * pixels.height / height)
+                }
+                line.box = map(line.box)
+                line.wordBoxes = line.wordBoxes.map(map)
+                found.append(line)
+            }
+        }
+        return found
     }
 
     /// Vision marks a line it struggled with (small or faint text, sometimes read upside-down) with low confidence.

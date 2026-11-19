@@ -20,6 +20,7 @@ struct CodeOffer {
 final class ResultHandler {
     let history = CaptureHistory.standard()
     private let hud = HUD()
+    private let codeConfirmation = CodeConfirmation()
     private let synthesizer = AVSpeechSynthesizer()
     private var progressTimer: Timer?
     private(set) lazy var editor = ResultPanelController(output: self)
@@ -92,16 +93,14 @@ final class ResultHandler {
         }
     }
 
-    /// The confirmation for a capture with codes: a link can be opened from it (never automatically, unless the
-    /// "open links" setting says so), and one click swaps the clipboard to the text only or the codes only.
+    /// The confirmation for a capture with codes. A link opens with ↩ or a click, never by itself (unless the
+    /// "open links" setting says so); esc leaves what was copied. The other buttons switch the clipboard to the
+    /// text only or the codes only.
     private func confirmCodes(_ offer: CodeOffer, copied: String, kind: ResultKind) {
         let links = offer.codes.compactMap(\.link)
         let link = links.count == 1 ? links.first : nil
         let name = offer.codes.count == 1 ? offer.codes[0].kind : "\(offer.codes.count) codes"
-        var actions: [HUD.Action] = []
-        if let link {
-            actions.append(HUD.Action(title: "Open \(link.host ?? "Link")", isPrimary: true) { NSWorkspace.shared.open(link) })
-        }
+        let symbol = offer.codes.allSatisfy { $0.kind == "barcode" } ? "barcode" : "qrcode"
         var current = copied
         let swap = { [weak self] (new: String, newKind: ResultKind, message: String) in
             guard let self else { return }
@@ -109,31 +108,36 @@ final class ResultHandler {
             current = new
             self.hud.show(symbol: "checkmark.circle.fill", title: message, detail: self.preview(new))
         }
-        switch offer.choice {
-        case .textAndCodes:
-            actions.append(HUD.Action(title: "Text Only") { swap(offer.textOnly, .text, "Copied the text only") })
-            actions.append(HUD.Action(title: "\(offer.codes.count == 1 ? "Code" : "Codes") Only") { swap(offer.codesOnly, .barcode, "Copied the code only") })
-        case .codesOnly where !offer.textOnly.isEmpty:
-            actions.append(HUD.Action(title: "Copy the Text Instead") { swap(offer.textOnly, .text, "Copied the text") })
-        default: break
-        }
-        actions.append(HUD.Action(title: "Close") {})
+        let open = link.map { url in CodeConfirmation.Action(title: "Open Link") { NSWorkspace.shared.open(url) } }
+        let done = CodeConfirmation.Action(title: "Done") {}
 
-        let title: String
-        let detail: String
-        var footnote: String?
+        var content: CodeConfirmation.Content
         switch offer.choice {
         case .textAndCodes:
-            title = "Text and \(name.lowercasedFirst) copied"
-            detail = preview(offer.textOnly)
-            footnote = "+ " + (link?.absoluteString ?? preview(offer.codesOnly))
+            let lines = offer.textOnly.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+            let rest = lines.dropFirst().joined(separator: " ")
+            content = CodeConfirmation.Content(
+                symbol: symbol, caption: "Text and \(name.lowercasedFirst) copied",
+                title: lines.first ?? "", detail: rest.isEmpty ? nil : rest,
+                linkRow: link?.absoluteString ?? offer.codesOnly.replacingOccurrences(of: "\n", with: "  ·  "),
+                primary: open ?? done, showsCancel: open != nil,
+                secondary: [
+                    .init(title: "Text Only") { swap(offer.textOnly, .text, "Copied the text only") },
+                    .init(title: offer.codes.count == 1 ? "Code Only" : "Codes Only") { swap(offer.codesOnly, .barcode, "Copied the code only") },
+                ])
         default:
-            title = link != nil ? "Link from \(name.lowercasedFirst) copied" : "\(name.uppercasedFirst) copied"
-            detail = preview(offer.codesOnly)
+            content = CodeConfirmation.Content(
+                symbol: symbol,
+                caption: link != nil ? "Link from \(name.lowercasedFirst) copied" : "\(name.uppercasedFirst) copied",
+                // The site in large type: it is what to check before opening a link from a code.
+                title: link?.host ?? offer.codesOnly, titleIsCode: link == nil,
+                detail: link?.absoluteString,
+                primary: open ?? done, showsCancel: open != nil)
+            if !offer.textOnly.isEmpty {
+                content.secondary = [.init(title: "Copy the Text Instead") { swap(offer.textOnly, .text, "Copied the text") }]
+            }
         }
-        // The domain in bold when the link is the whole capture: it is what to check before opening.
-        hud.show(symbol: "qrcode.viewfinder", title: title, emphasis: offer.choice == .codesOnly ? link?.host : nil,
-                 detail: detail, footnote: footnote, actions: actions)
+        codeConfirmation.show(content)
     }
 
     /// The clipboard, history and "Edit Last Capture" switch from what a capture copied to another version of it.
@@ -220,26 +224,12 @@ final class ResultHandler {
 
 /// A small panel near the bottom of the screen that confirms what happened and shows what was captured.
 final class HUD {
-    /// A button on the confirmation. Clicking it runs `perform` and closes the confirmation.
-    struct Action {
-        var title: String
-        var isPrimary = false
-        var perform: () -> Void
-    }
-
     private var panel: NSPanel?
     private var dismissal: DispatchWorkItem?
-    private var actions: [Action] = []
-    private var hover: HoverWatcher?
-
-    /// With `actions`, the confirmation takes clicks (without taking focus from the app in front), shows even when
-    /// confirmations are turned off, and stays while the pointer is over it.
-    func show(symbol: String, title: String, emphasis: String? = nil, detail: String?, footnote: String? = nil,
-              stays: Bool = false, actions: [Action] = []) {
-        guard Prefs.bool(Prefs.Key.showHUD) || !actions.isEmpty else { return }
+    func show(symbol: String, title: String, detail: String?, footnote: String? = nil, stays: Bool = false) {
+        guard Prefs.bool(Prefs.Key.showHUD) else { return }
         dismissal?.cancel()
         panel?.orderOut(nil)
-        self.actions = actions
 
         let icon = NSImageView()
         icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
@@ -254,12 +244,6 @@ final class HUD {
         textStack.orientation = .vertical
         textStack.alignment = .leading
         textStack.spacing = 3
-        if let emphasis, !emphasis.isEmpty {
-            let label = NSTextField(labelWithString: emphasis)
-            label.font = .systemFont(ofSize: 14, weight: .bold)
-            label.lineBreakMode = .byTruncatingMiddle
-            textStack.addArrangedSubview(label)
-        }
         if let detail, !detail.isEmpty {
             let label = NSTextField(wrappingLabelWithString: detail)
             label.font = .systemFont(ofSize: 12)
@@ -276,27 +260,6 @@ final class HUD {
             label.font = .systemFont(ofSize: 11)
             label.textColor = .tertiaryLabelColor
             textStack.addArrangedSubview(label)
-        }
-
-        if !actions.isEmpty {
-            let buttons = actions.enumerated().map { index, action -> NSButton in
-                let button = FirstClickButton(title: action.title, target: self, action: #selector(clicked(_:)))
-                button.tag = index
-                button.controlSize = .small
-                button.bezelStyle = .rounded
-                // The panel never becomes key, so neither a default button nor a tint is drawn: a bold title is.
-                if action.isPrimary {
-                    button.attributedTitle = NSAttributedString(string: action.title, attributes: [
-                        .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .bold),
-                    ])
-                }
-                return button
-            }
-            let buttonRow = NSStackView(views: buttons)
-            buttonRow.orientation = .horizontal
-            buttonRow.spacing = 6
-            textStack.setCustomSpacing(10, after: textStack.arrangedSubviews.last!)
-            textStack.addArrangedSubview(buttonRow)
         }
 
         let row = NSStackView(views: [icon, textStack])
@@ -321,7 +284,7 @@ final class HUD {
             row.topAnchor.constraint(equalTo: background.topAnchor),
             row.bottomAnchor.constraint(equalTo: background.bottomAnchor),
             background.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
-            background.widthAnchor.constraint(lessThanOrEqualToConstant: actions.isEmpty ? 370 : 460),
+            background.widthAnchor.constraint(lessThanOrEqualToConstant: 370),
         ])
 
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -329,7 +292,7 @@ final class HUD {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.level = .statusBar
-        panel.ignoresMouseEvents = actions.isEmpty
+        panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.contentView = background
         background.layoutSubtreeIfNeeded()
@@ -346,20 +309,8 @@ final class HUD {
         self.panel = panel
 
         guard !stays else { return }
-        // Long enough to read the preview, then a short fade. With buttons: long enough to decide, and never
-        // while the pointer is over it.
-        let delay: TimeInterval = actions.isEmpty ? (detail == nil ? 1.1 : 1.8) : 8
-        if actions.isEmpty {
-            hover = nil
-        } else {
-            let watcher = HoverWatcher(
-                entered: { [weak self] in self?.dismissal?.cancel() },
-                exited: { [weak self] in self?.scheduleFade(after: 2) })
-            background.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                                                      owner: watcher, userInfo: nil))
-            hover = watcher
-        }
-        scheduleFade(after: delay)
+        // Long enough to read the preview, then a short fade.
+        scheduleFade(after: detail == nil ? 1.1 : 1.8)
     }
 
     private func scheduleFade(after delay: TimeInterval) {
@@ -373,36 +324,6 @@ final class HUD {
         dismissal = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
-
-    @objc private func clicked(_ sender: NSButton) {
-        let action = actions.indices.contains(sender.tag) ? actions[sender.tag] : nil
-        dismissal?.cancel()
-        panel?.orderOut(nil)
-        hover = nil
-        action?.perform()
-    }
-}
-
-/// A button that works on the first click in a panel that never becomes key (so the user's app keeps focus).
-private final class FirstClickButton: NSButton {
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-}
-
-/// Receives the pointer entering and leaving the confirmation.
-private final class HoverWatcher: NSResponder {
-    private let entered: () -> Void
-    private let exited: () -> Void
-
-    init(entered: @escaping () -> Void, exited: @escaping () -> Void) {
-        self.entered = entered
-        self.exited = exited
-        super.init()
-    }
-
-    required init?(coder: NSCoder) { fatalError("not used") }
-
-    override func mouseEntered(with event: NSEvent) { entered() }
-    override func mouseExited(with event: NSEvent) { exited() }
 }
 
 private extension String {

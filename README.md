@@ -192,4 +192,7 @@ The same binary reads files when given arguments:
 | `Sources/TextGrabberCore/ExactText.swift` | Matches recognised lines against an app's real text to restore emoji and symbols |
 | `Sources/TextGrabber/` | The menu bar app: capture, shortcuts, clipboard, HUD, history, settings, CLI |
 | `Tests/TextGrabberCoreTests/` | Layout engine tests |
-| `research/` | What other screen-text apps offer, from public sources |
+
+## License
+
+MIT. See [LICENSE](LICENSE).

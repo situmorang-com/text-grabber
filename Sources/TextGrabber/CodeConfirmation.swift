@@ -172,7 +172,7 @@ private final class FirstClickHostingView<Content: View>: NSHostingView<Content>
 
 /// Frosted glass: a see-through tint in the panel's rounded shape and a fine light edge, over what the window
 /// server blurs behind the panel. It keeps the colour of what is behind, where system materials turn grey.
-private final class FrostedSurface: NSView {
+final class FrostedSurface: NSView {
     static let cornerRadius: CGFloat = 20
 
     override var isOpaque: Bool { false }

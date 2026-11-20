@@ -12,7 +12,6 @@ enum Prefs {
         static let detectColumns = "detectColumns"
         static let detectTables = "detectTables"
         static let additive = "additiveClipboard"
-        static let additiveBuffer = "additiveBuffer"
         static let speak = "speakAfterCapture"
         static let speechRate = "speechRate"
         static let openLinks = "openLinks"
@@ -28,6 +27,7 @@ enum Prefs {
         static let historyPictures = "historyPictures"
         static let setupDone = "setupDone"
         static let readCodes = "readCodesInTextCaptures"
+        static let settingsTab = "settingsTab"
     }
 
     static let defaults = UserDefaults.standard
@@ -42,7 +42,6 @@ enum Prefs {
             Key.detectColumns: true,
             Key.detectTables: true,
             Key.additive: false,
-            Key.additiveBuffer: "",
             Key.speak: false,
             Key.speechRate: 0.5,
             Key.openLinks: false,
@@ -67,9 +66,9 @@ enum Prefs {
     static func bool(_ key: String) -> Bool { defaults.bool(forKey: key) }
     static func toggle(_ key: String) { defaults.set(!defaults.bool(forKey: key), forKey: key) }
 
-    static var additiveBuffer: String {
-        get { defaults.string(forKey: Key.additiveBuffer) ?? "" }
-        set { defaults.set(newValue, forKey: Key.additiveBuffer) }
+    /// Earlier versions kept added captures here instead of using the clipboard; that text is not needed now.
+    static func removeOldKeys() {
+        defaults.removeObject(forKey: "additiveBuffer")
     }
 
     /// "x,y,w,h" in global screen points, as `screencapture -R` expects.
@@ -89,5 +88,13 @@ enum Prefs {
         options.detectColumns = bool(Key.detectColumns)
         options.detectTables = bool(Key.detectTables)
         return options
+    }
+}
+
+extension CaptureSwitches {
+    /// What the settings say, for a capture read with `lineMode` (nil: the line break setting).
+    static func settings(lineMode: LineMode? = nil) -> CaptureSwitches {
+        CaptureSwitches(additive: Prefs.bool(Prefs.Key.additive), lineMode: lineMode ?? Prefs.lineMode,
+                        speak: Prefs.bool(Prefs.Key.speak))
     }
 }

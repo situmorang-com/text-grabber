@@ -5,14 +5,17 @@ import ServiceManagement
 import TextGrabberCore
 
 struct SettingsView: View {
+    /// The tab last shown ("general", "recognition", "shortcuts"); also set by `snapshot?window=settings&tab=`.
+    @AppStorage(Prefs.Key.settingsTab) private var tab = "general"
+
     var body: some View {
-        TabView {
-            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }
-            RecognitionSettings().tabItem { Label("Recognition", systemImage: "text.viewfinder") }
-            ShortcutSettings().tabItem { Label("Shortcuts", systemImage: "keyboard") }
+        TabView(selection: $tab) {
+            GeneralSettings().tabItem { Label("General", systemImage: "gearshape") }.tag("general")
+            RecognitionSettings().tabItem { Label("Recognition", systemImage: "text.viewfinder") }.tag("recognition")
+            ShortcutSettings().tabItem { Label("Shortcuts", systemImage: "keyboard") }.tag("shortcuts")
         }
         .padding(12)
-        .frame(width: 520, height: 480)
+        .frame(width: 520, height: 600)
     }
 }
 
@@ -28,6 +31,13 @@ private struct GeneralSettings: View {
     @AppStorage(Prefs.Key.historyPictures) private var historyPictures = true
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginError: String?
+
+    /// "⌘C, ⌘L and ⌘S", or "the keys in the Shortcuts tab" when none is set.
+    private static var optionKeysText: String {
+        let keys = CaptureOption.allCases.compactMap { Shortcut.stored(for: $0)?.display }
+        guard let last = keys.last else { return "the keys in Shortcuts" }
+        return keys.count == 1 ? last : keys.dropLast().joined(separator: ", ") + " and " + last
+    }
 
     var body: some View {
         Form {
@@ -45,19 +55,24 @@ private struct GeneralSettings: View {
                     Text(loginError).font(.caption).foregroundStyle(.red)
                 }
             }
-            Section("After a capture") {
+            Section {
                 Toggle("Open the editor (edit, translate, clean up) instead of only copying", isOn: $openEditor)
                 Toggle("Show a confirmation with a preview", isOn: $showHUD)
                 Toggle("Keep a history of captures on this Mac", isOn: $keepHistory)
                 Toggle("Include a small picture of each capture in the history", isOn: $historyPictures)
                     .disabled(!keepHistory)
                 Toggle("Open the link when the capture is a single link", isOn: $openLinks)
-                Toggle("Additive clipboard: add each capture to the previous ones", isOn: $additive)
-                Toggle("Speak the text", isOn: $speak)
+                Toggle("Additive clipboard: add each capture to the text on the clipboard", isOn: $additive)
+                Toggle("Read the text aloud", isOn: $speak)
                 HStack {
                     Text("Speaking speed")
                     Slider(value: $speechRate, in: 0.3...0.65)
                 }
+            } header: {
+                Text("After a capture")
+            } footer: {
+                Text("While you select an area, \(Self.optionKeysText) switch these and line breaks for that capture only. Added text goes on the same line, or on a new line when line breaks are kept.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Capturing") {
                 Toggle("Mute the screenshot sound", isOn: $muteShutter)
@@ -151,6 +166,8 @@ private struct RecognitionSettings: View {
 
 private struct ShortcutSettings: View {
     @State private var conflicts = HotKeyCenter.shared.conflicts
+    /// A shortcut that was refused because another one uses it: which section, and why.
+    @State private var problem: (inOptions: Bool, message: String)?
 
     var body: some View {
         Form {
@@ -163,22 +180,48 @@ private struct ShortcutSettings: View {
                                     .foregroundStyle(.orange)
                                     .help("Another app already uses this shortcut.")
                             }
-                            ShortcutRecorder(action: action) { conflicts = HotKeyCenter.shared.conflicts }
+                            ShortcutRecorder(slot: action, report: { problem = $0.map { (false, $0) } }) {
+                                conflicts = HotKeyCenter.shared.conflicts
+                            }
                         }
                     }
                 }
             } footer: {
-                Text("Click a shortcut, then press the new keys. Press Delete to remove it, Esc to cancel.")
-                    .font(.caption).foregroundStyle(.secondary)
+                footer("Click a shortcut, then press the new keys. Press Delete to remove it, Esc to cancel.", inOptions: false)
+            }
+            Section {
+                ForEach(CaptureOption.allCases) { option in
+                    LabeledContent(option.title) {
+                        ShortcutRecorder(slot: option, report: { problem = $0.map { (true, $0) } }) {}
+                    }
+                }
+            } header: {
+                Text("While selecting an area")
+            } footer: {
+                footer("Press these while the crosshair shows; they are ordinary keys again as soon as it goes. Each press switches that option on or off for that capture alone, starting from the settings in General. Added text goes after the text on the clipboard: on the same line, or on a new line when line breaks are kept. ⌘ and ⌃ belong to macOS while you select.", inOptions: true)
             }
         }
         .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private func footer(_ text: String, inOptions: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let problem, problem.inOptions == inOptions {
+                Label(problem.message, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
+            Text(text).foregroundStyle(.secondary)
+        }
+        .font(.caption)
     }
 }
 
 /// A button that records the next key combination pressed.
 private struct ShortcutRecorder: View {
-    let action: HotKeyAction
+    let slot: any ShortcutSlot
+    /// Told why a shortcut was refused, or nil once recording starts again.
+    var report: (String?) -> Void = { _ in }
     var onChange: () -> Void
     @State private var shortcut: Shortcut?
     @State private var recording = false
@@ -189,30 +232,40 @@ private struct ShortcutRecorder: View {
             recording ? stop() : start()
         }
         .frame(minWidth: 110)
-        .onAppear { shortcut = Shortcut.stored(for: action) }
+        .onAppear { shortcut = Shortcut.stored(for: slot) }
         .onDisappear(perform: stop)
     }
 
     private func start() {
         recording = true
+        report(nil)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
             if event.keyCode == 53 {            // Esc
                 stop()
             } else if event.keyCode == 51 || event.keyCode == 117 {   // Delete
                 save(nil)
-            } else if !modifiers.intersection([.command, .option, .control]).isEmpty,
-                      let key = event.charactersIgnoringModifiers, !key.isEmpty {
-                save(Shortcut(keyCode: UInt32(event.keyCode), modifiers: modifiers, key: Self.name(for: event, fallback: key)))
+            } else if let key = event.charactersIgnoringModifiers, !key.isEmpty {
+                let new = Shortcut(keyCode: UInt32(event.keyCode), modifiers: modifiers, key: Self.name(for: event, fallback: key))
+                // Refused keys keep the recorder listening, so another can be pressed straight away.
+                if let problem = slot.problem(with: new) {
+                    NSSound.beep()
+                    report(problem)
+                } else if let owner = Shortcut.owner(of: new, besides: slot) {
+                    NSSound.beep()
+                    report("\(new.display) is already used for “\(owner.title)”.")
+                } else {
+                    save(new)
+                }
             } else {
-                NSSound.beep()   // needs ⌘, ⌥ or ⌃ so it cannot swallow ordinary typing
+                NSSound.beep()
             }
             return nil
         }
     }
 
     private func save(_ new: Shortcut?) {
-        Shortcut.store(new, for: action)
+        Shortcut.store(new, for: slot)
         shortcut = new
         HotKeyCenter.shared.reload()
         onChange()

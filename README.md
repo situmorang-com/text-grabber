@@ -26,6 +26,7 @@
 **Capture**
 - **One shortcut, anywhere.** Press ⇧⌘1, drag over anything on screen, and the text is copied. Shortcuts are yours to change.
 - **Capture the last area again**, keep every line break, or read the image on the clipboard.
+- **Options while you select**: press **C** to add the text to what is already on the clipboard, **L** to keep its line breaks, **S** to hear it read aloud. For that capture only; a small strip shows which are on.
 - **Scrolling capture** for text longer than the screen: scroll, and the pictures are joined without repeats.
 - **Images and PDFs**: drop them on the app icon, or open them from the menu.
 - **Every display**, Retina or not, including screens above or left of the main one.
@@ -44,7 +45,7 @@
 **After a capture**
 - **Editor**: change line breaks and format, **translate** on this Mac (macOS 15+), or **clean up** misreads with Apple Intelligence (macOS 26+).
 - **History** of past captures with small pictures, pinning and search.
-- **Optional extras**: read the text aloud, add each capture to the previous ones, open a captured link.
+- **Optional extras**: read every capture aloud, add every capture to the text on the clipboard, open a captured link.
 
 **Automation**
 - **Shortcuts and Siri** actions: capture text, read a QR code, extract text from images and PDFs.
@@ -94,6 +95,22 @@ The normal capture shortcut reads codes too; no separate shortcut is needed.
 - **Capturing a page that has a code** (a poster, an invoice, a sign-in card): the clipboard gets the text, a blank line, then the code's content, unless the text already contains it.
 
 Text read inside a code, lines cut by the edge of the selection, text that repeats the code and fragments that are not words do not count; when fewer than 8 words are left, the capture is about the code. The confirmation shows what was copied, with the site a link goes to in large type, and lets you change it: **Text** (⌘C) for the text only, **QR** (⌘L) for the code only, or **Both** (⎋) for the text and then the link on its own line. **Open Link** (⏎) copies both as well and opens the link; nothing opens by itself unless "Open the link when the capture is a single link" is on. While the confirmation shows it takes the keyboard without bringing TextGrabber to the front, and any other key closes it and goes on to the app you were in (this needs Accessibility; without it the confirmation works by click only). Settings → Recognition can turn code reading off; "Read QR Code or Barcode" in the menu still reads codes only.
+
+## Options while you select
+
+While the crosshair is showing, three keys change what happens to this capture:
+
+| Key | Option |
+|---|---|
+| **C** | **Add to the clipboard**: the text goes after the text already on the clipboard instead of replacing it |
+| **L** | **Keep line breaks**: every line stays a line, and added text starts on a new line |
+| **S** | **Read aloud**: the captured text is spoken once it is copied (only this capture, not the whole clipboard) |
+
+Each press switches that option on or off, starting from the settings (General, and the menu's Additive Clipboard, Line Breaks and Speak After Capture), so with Additive Clipboard always on, C makes one capture replace the clipboard instead. Press them before or during the drag. At the first press a strip at the bottom of the screen shows which options are on; it moves to the top when the pointer comes near, and it never appears in the capture.
+
+Added text continues the same line, with a space, as if the two pieces were one paragraph: a word hyphenated across the two is put back together, and Chinese and Japanese text gets no space. It goes on a new line when line breaks are kept, and always next to a table, so rows are not run together. If the clipboard holds no text (an image, or nothing), the capture is copied as usual.
+
+The keys are taken only while the crosshair shows, and typed letters again the moment it closes. Change them in Settings → Shortcuts. ⌘ and ⌃ cannot be part of them: while you select, macOS uses ⌘ to switch to Visual Intelligence (each press switches, and a selection made then is not a screenshot), and ⌃ held when you let go sends the screenshot to the clipboard.
 
 ## Scrolling capture
 
@@ -165,9 +182,11 @@ URL actions, for Shortcuts ("Open URL"), Raycast, Alfred or scripts:
 | `textgrabber://edit-last` | Reopen the last capture in the editor |
 | `textgrabber://history`, `textgrabber://settings`, `textgrabber://setup` | Open those windows |
 | `textgrabber://probe?rect=x,y,w,h` | Read that screen area into the capture log only |
-| `textgrabber://snapshot?window=setup` | Draw a window (`setup`, `settings`, `history`, `editor`) to a PNG in `~/Library/Logs/TextGrabber`, without taking focus; works while the screen is locked |
+| `textgrabber://snapshot?window=setup` | Draw a window (`setup`, `settings`, `history`, `editor`) to a PNG in `~/Library/Logs/TextGrabber`, without taking focus; works while the screen is locked. `tab=general\|recognition\|shortcuts` picks the settings tab |
 
-Add `edit=1` to any capture action to open the editor for that capture.
+Add `edit=1` to any capture action to open the editor for that capture, and `add=1`, `keep-lines=1` or `speak=1` (or `=0`) to start it with that option on (or off), as the C, L and S keys would.
+
+`textgrabber://selftest-capture-options?keys=additive,keepLines,speak` checks the option keys on this Mac: it shows a test window, makes a real capture of it while pressing the keys, and writes the result to the capture log. The clipboard is pretend (`base=` sets its text), nothing is spoken and nothing goes to the history. `variant=middrag` presses the keys during the drag; `variant=command` presses ⌘ first, to see whether macOS still takes ⌘ while you select. It needs Accessibility, moves the pointer for about three seconds, and puts it back.
 
 ## Command line
 

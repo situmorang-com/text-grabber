@@ -15,6 +15,8 @@ struct CaptureResult {
     var fixedText: String?
     /// Added after the text whatever the layout: the content of QR codes and barcodes found beside it.
     var appendix: String?
+    /// The clipboard text this capture was added to, and whether on a new line: the editor's Copy adds there too.
+    var addedTo: (base: String, newLine: Bool)?
 
     static func fixed(_ text: String, kind: ResultKind) -> CaptureResult {
         CaptureResult(pages: [], structures: [], options: RecognitionOptions(), kind: kind, fixedText: text)
@@ -149,8 +151,14 @@ final class ResultPanelModel: ObservableObject {
     }
 
     func copy(andClose: Bool) {
-        output.write(text)
-        output.notify(symbol: "doc.on.clipboard", title: "Copied")
+        // A capture that was added to earlier clipboard text stays added to it.
+        if let added = result.addedTo {
+            output.write(AdditiveText.append(text, to: added.base, newLine: added.newLine, isWord: Dictionary.isWholeWord))
+            output.notify(symbol: "plus.square.on.square", title: "Added to clipboard")
+        } else {
+            output.write(text)
+            output.notify(symbol: "doc.on.clipboard", title: "Copied")
+        }
         if andClose { close() }
     }
 

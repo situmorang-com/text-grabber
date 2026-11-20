@@ -14,6 +14,8 @@ final class ScrollingCapture {
     private let state = ScrollingState()
     /// Self-test: write the result to the capture log only.
     private var logOnly = false
+    /// The options chosen while the area was selected (line breaks, add to the clipboard, read aloud).
+    private var switches = CaptureSwitches()
     private static let maximumFrames = 120
 
     var isRunning: Bool { running }
@@ -24,9 +26,10 @@ final class ScrollingCapture {
     }
 
     /// Starts with the area the user selected and the picture of it taken at that moment.
-    func start(rect: CGRect, firstFrame: CGImage, logOnly: Bool = false) {
+    func start(rect: CGRect, firstFrame: CGImage, logOnly: Bool = false, switches: CaptureSwitches = .settings()) {
         self.rect = rect
         self.logOnly = logOnly
+        self.switches = switches
         frames = [firstFrame]
         lastFrameData = nil
         running = true
@@ -42,7 +45,8 @@ final class ScrollingCapture {
         let captured = frames
         frames = []
         output.showProgressIfSlow()
-        let options = Prefs.recognitionOptions()
+        let switches = self.switches
+        let options = Prefs.recognitionOptions(lineMode: switches.lineMode(otherwise: Prefs.lineMode))
         DispatchQueue.global(qos: .userInitiated).async {
             var stitchFrames: [ScrollStitcher.Frame] = []
             var recognitionOptions = options
@@ -63,7 +67,7 @@ final class ScrollingCapture {
                     AccessibilityText.writeLog("scrolling capture self-test\npictures: \(captured.count), gaps: \(stitched.gaps), unchanged: \(stitched.unchanged)\n\ntext delivered:\n\(text)\n")
                     return
                 }
-                self.output.deliver(text, kind: .text, note: note, result: result, picture: captured.first)
+                self.output.deliver(text, kind: .text, note: note, result: result, picture: captured.first, switches: switches)
             }
         }
     }

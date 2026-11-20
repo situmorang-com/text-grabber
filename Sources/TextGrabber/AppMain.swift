@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Prefs.registerDefaults()
+        Prefs.removeOldKeys()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
@@ -73,14 +74,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func handle(_ url: URL) {
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         let value = { (name: String) in query.first { $0.name == name }?.value }
-        if value("edit") == "1" || value("edit") == "true" { output.editNext = true }
+        let flag = { (name: String) -> Bool? in value(name).map { ["1", "true", "yes", "on"].contains($0.lowercased()) } }
+        if flag("edit") == true { output.editNext = true }
+        // add=1, keep-lines=1, speak=1 (or =0): what the capture starts with, in place of the settings.
+        let options: [(CaptureOption, Bool?)] = [(.additive, flag("add")), (.keepLines, flag("keep-lines")), (.speak, flag("speak"))]
+        let adjust = { (switches: inout CaptureSwitches) in
+            for case let (option, value?) in options { switches[option] = value }
+        }
         switch url.host {
-        case "capture": perform(.captureText)
-        case "capture-edit": perform(.captureAndEdit)
-        case "capture-scrolling": perform(.captureScrolling)
-        case "capture-last-area": perform(.captureLastArea)
-        case "capture-keep-lines": perform(.captureKeepLines)
-        case "read-code": perform(.captureBarcode)
+        case "capture": perform(.captureText, adjust: adjust)
+        case "capture-edit": perform(.captureAndEdit, adjust: adjust)
+        case "capture-scrolling": perform(.captureScrolling, adjust: adjust)
+        case "capture-last-area": perform(.captureLastArea, adjust: adjust)
+        case "capture-keep-lines": perform(.captureKeepLines, adjust: adjust)
+        case "read-code": perform(.captureBarcode, adjust: adjust)
         case "clipboard": perform(.clipboardImage)
         case "edit-last": editLast()
         case "stop-speaking": perform(.stopSpeaking)
@@ -91,6 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case "settings": showSettings()
         case "setup": showSetup()
         case "history": showHistory()
+        case "selftest-capture-options":
+            // textgrabber://selftest-capture-options?keys=additive,keepLines,speak&base=Earlier%20text
+            let keys = (value("keys") ?? "additive,keepLines,speak").split(separator: ",").compactMap { CaptureOption(rawValue: String($0)) }
+            CaptureOptionsSelfTest.run(capture: capture, output: output, keys: keys, clipboard: value("base") ?? "Earlier text",
+                                       variant: value("variant") ?? "")
         case "selftest-scrolling":
             if let path = value("path"), let image = NSImage(contentsOfFile: path) { capture.scrolling.selfTest(image: image) }
         case "probe":
@@ -104,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // It does not take focus from the app the user is in, and closes the window again if it was closed,
             // unless keep=1 (to screenshot the real window; textgrabber://hide?window=… closes it after).
             let name = value("window") ?? "setup"
+            if let tab = value("tab") { Prefs.defaults.set(tab, forKey: Prefs.Key.settingsTab) }
             let wasOpen = WindowSnapshot.window(named: name) != nil
             WindowSnapshot.isTaking = true
             switch name {
@@ -125,18 +138,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func perform(_ action: HotKeyAction) {
+    /// - Parameter adjust: changes the options a capture starts with (from a URL action).
+    private func perform(_ action: HotKeyAction, adjust: ((inout CaptureSwitches) -> Void)? = nil) {
         switch action {
-        case .captureText: capture.captureScreen(.text(nil))
-        case .captureLastArea: capture.captureScreen(.text(nil), lastArea: true)
-        case .captureKeepLines: capture.captureScreen(.text(.keepLines))
+        case .captureText: capture.captureScreen(.text(nil), adjust: adjust)
+        case .captureLastArea: capture.captureScreen(.text(nil), lastArea: true, adjust: adjust)
+        case .captureKeepLines: capture.captureScreen(.text(.keepLines), adjust: adjust)
         case .captureAndEdit:
             output.editNext = true
-            capture.captureScreen(.text(nil))
+            capture.captureScreen(.text(nil), adjust: adjust)
         case .captureScrolling:
             // The same shortcut finishes a scrolling capture that is running.
-            if capture.scrolling.isRunning { capture.scrolling.finish() } else { capture.captureScreen(.scrolling) }
-        case .captureBarcode: capture.captureScreen(.barcode)
+            if capture.scrolling.isRunning { capture.scrolling.finish() } else { capture.captureScreen(.scrolling, adjust: adjust) }
+        case .captureBarcode: capture.captureScreen(.barcode, adjust: adjust)
         case .clipboardImage: capture.recogniseClipboard()
         case .stopSpeaking: output.stopSpeaking()
         }
@@ -180,7 +194,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(modeItem)
 
         add("Additive Clipboard", #selector(toggleAdditive)).state = Prefs.bool(Prefs.Key.additive) ? .on : .off
-        add("Clear Additive Clipboard", #selector(clearAdditive)).isEnabled = !Prefs.additiveBuffer.isEmpty
         add("Speak After Capture", #selector(toggleSpeak)).state = Prefs.bool(Prefs.Key.speak) ? .on : .off
         add("Stop Speaking", #selector(stopSpeaking), shortcut: .stopSpeaking).isEnabled = output.isSpeaking
         menu.addItem(.separator())
@@ -249,11 +262,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         output.notify(symbol: "plus.square.on.square", title: Prefs.bool(Prefs.Key.additive) ? "Additive clipboard on" : "Additive clipboard off")
     }
 
-    @objc private func clearAdditive() {
-        Prefs.additiveBuffer = ""
-        output.notify(symbol: "trash", title: "Additive clipboard cleared")
-    }
-
     @objc private func toggleSpeak() { Prefs.toggle(Prefs.Key.speak) }
 
     @objc private func copyHistoryEntry(_ sender: NSMenuItem) {
@@ -281,7 +289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func showSettings() {
         if settingsWindow == nil {
-            settingsWindow = makeWindow(title: "TextGrabber Settings", size: NSSize(width: 520, height: 480),
+            settingsWindow = makeWindow(title: "TextGrabber Settings", size: NSSize(width: 520, height: 600),
                                         content: SettingsView())
         }
         present(settingsWindow)

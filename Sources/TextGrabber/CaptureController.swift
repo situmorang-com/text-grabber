@@ -13,6 +13,20 @@ final class CaptureController {
     private(set) var isBusy = false
     private let output: ResultHandler
     private(set) lazy var scrolling = ScrollingCapture(output: output) { [weak self] in self?.isBusy = false }
+    /// The options of the capture being made; while the crosshair shows, the option keys switch them.
+    private(set) var switches = CaptureSwitches()
+    /// The option keys that work while the crosshair shows (registered then, released after).
+    private(set) var optionKeys: [OptionKey] = []
+    let optionsPanel = CaptureOptionsPanel()
+    /// Whether the options panel showed during the last selection (for the self-test).
+    private(set) var optionsPanelShown = false
+    /// How the last `screencapture` ended: its exit status, and whether it left a picture (for the self-test).
+    private(set) var lastExit: (status: Int32, picture: Bool)?
+    /// The running `screencapture -i`, so a self-test can end it.
+    private var selection: Process?
+    /// Gives the option keys back if the crosshair is gone without the usual notice (a plain letter must never
+    /// stay taken).
+    private var optionKeysWatch: Timer?
 
     init(output: ResultHandler) {
         self.output = output
@@ -22,9 +36,11 @@ final class CaptureController {
 
     /// - Parameter probeRect: capture this exact area ("x,y,w,h") and only write the capture log:
     ///   no clipboard, history or confirmation. For checking what the app does on a known piece of screen.
+    /// - Parameter adjust: changes the options this capture starts with (URL actions: add=1, keep-lines=1, speak=1).
     /// - Returns: whether a capture started (false when one is already running or access is missing).
     @discardableResult
-    func captureScreen(_ kind: CaptureKind, lastArea: Bool = false, probeRect: String? = nil) -> Bool {
+    func captureScreen(_ kind: CaptureKind, lastArea: Bool = false, probeRect: String? = nil,
+                       adjust: ((inout CaptureSwitches) -> Void)? = nil) -> Bool {
         // A probe always answers in the log, so a script waiting for it learns why nothing happened.
         let probeNote = { (reason: String) in if probeRect != nil { AccessibilityText.writeLog("probe: \(reason)\n") } }
         guard !isBusy else { probeNote("not started: a capture is already running"); return false }
@@ -32,13 +48,22 @@ final class CaptureController {
         if Prefs.bool(Prefs.Key.exactText) { AccessibilityText.wakeRunningApps() }
 
         var arguments: [String] = []
+        var selecting = false
         if let probeRect {
             arguments += ["-R", probeRect]
         } else if lastArea, let rect = Prefs.lastRect {
             arguments += ["-R", rect]
         } else {
             arguments += ["-i"]
+            selecting = true
         }
+        // The capture's options start from the settings; the option keys switch them while the user selects.
+        var usualLineMode = Prefs.lineMode
+        if case .text(let override?) = kind { usualLineMode = override }
+        var switches = CaptureSwitches.settings(lineMode: usualLineMode)
+        adjust?(&switches)
+        self.switches = switches
+        optionsPanelShown = false
         if Prefs.bool(Prefs.Key.muteShutter) { arguments += ["-x"] }
         // No window shadow, so the image covers exactly the recorded rectangle.
         arguments += ["-o"]
@@ -55,6 +80,9 @@ final class CaptureController {
             try? FileManager.default.removeItem(at: file)
             DispatchQueue.main.async {
                 guard let self else { return }
+                self.lastExit = (finished.terminationStatus, data != nil)
+                if selecting { self.endOptionKeys() }
+                let switches = self.switches
                 guard let data, let image = ImagePrep.image(from: data) else {
                     probeNote("screencapture made no image (exit status \(finished.terminationStatus))"
                               + (Self.screenIsLocked ? "; the screen is locked, which stops every screenshot" : ""))
@@ -73,22 +101,72 @@ final class CaptureController {
                         self.output.fail("Scrolling capture needs an area", detail: "Drag to select the part of the window to scroll through.")
                         return
                     }
-                    self.scrolling.start(rect: area, firstFrame: image)   // stays busy until Done or Cancel
+                    self.scrolling.start(rect: area, firstFrame: image, switches: switches)   // stays busy until Done or Cancel
                     return
                 }
-                self.recognise([image], kind: kind, screenRect: Self.rect(from: rect ?? (lastArea ? Prefs.lastRect : nil)))
+                var readAs = kind
+                if case .text = kind { readAs = .text(switches.lineMode(otherwise: usualLineMode)) }
+                self.recognise([image], kind: readAs, screenRect: Self.rect(from: rect ?? (lastArea ? Prefs.lastRect : nil)),
+                               switches: switches)
             }
         }
         isBusy = true
+        if selecting {
+            beginOptionKeys()
+            selection = process
+        }
         do {
             try process.run()
         } catch {
+            if selecting { endOptionKeys() }
             isBusy = false
             probeNote("screencapture could not start: \(error.localizedDescription)")
             output.fail("Screen capture could not start", detail: error.localizedDescription)
             return false
         }
         return true
+    }
+
+    // MARK: Option keys
+
+    private func beginOptionKeys() {
+        let working = HotKeyCenter.shared.beginCaptureOptions { [weak self] option in self?.switchOption(option) }
+        optionKeys = CaptureOption.allCases.filter(working.contains).compactMap { option in
+            Shortcut.stored(for: option).map { OptionKey(option: option, key: $0.display) }
+        }
+        optionKeysWatch?.invalidate()
+        optionKeysWatch = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self, !(self.selection?.isRunning ?? false) else { return }
+            self.endOptionKeys()
+        }
+    }
+
+    /// A key pressed while the crosshair shows: switch that option for this capture, and show which are on.
+    private func switchOption(_ option: CaptureOption) {
+        guard isBusy, selection != nil else { return }
+        switches.toggle(option)
+        optionsPanel.show(switches, keys: optionKeys)
+        optionsPanelShown = true
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                             userInfo: [.announcement: "\(option.title) \(switches[option] ? "on" : "off")"])
+    }
+
+    /// The crosshair is gone: the option keys type letters again.
+    private func endOptionKeys() {
+        optionKeysWatch?.invalidate()
+        optionKeysWatch = nil
+        HotKeyCenter.shared.endCaptureOptions()
+        optionsPanel.close()
+        optionKeys = []
+        selection = nil
+    }
+
+    /// Whether the selection crosshair is showing.
+    var isSelecting: Bool { selection?.isRunning ?? false }
+
+    /// Ends a selection that is still showing, as Esc would (self-test).
+    func cancelSelection() {
+        if let selection, selection.isRunning { selection.terminate() }
     }
 
     static var screenIsLocked: Bool {
@@ -189,7 +267,8 @@ final class CaptureController {
 
     // MARK: Recognition
 
-    private func recognise(_ images: [CGImage], kind: CaptureKind, screenRect: CGRect? = nil, probe: Bool = false) {
+    private func recognise(_ images: [CGImage], kind: CaptureKind, screenRect: CGRect? = nil, probe: Bool = false,
+                           switches: CaptureSwitches? = nil) {
         isBusy = true
         if !probe { output.showProgressIfSlow() }
         DispatchQueue.global(qos: .userInitiated).async {
@@ -200,12 +279,13 @@ final class CaptureController {
                     self.isBusy = false
                     let text = CodeTriage.codesText(codes)
                     self.output.deliver(text, kind: .barcode, picture: images.first,
-                                        codes: codes.isEmpty ? nil : CodeOffer(choice: .codesOnly, codes: codes, textOnly: "", codesOnly: text))
+                                        codes: codes.isEmpty ? nil : CodeOffer(choice: .codesOnly, codes: codes, textOnly: "", codesOnly: text),
+                                        switches: switches)
                 }
             case .scrolling:
                 // Started from the selection instead (see captureScreen); a file or clipboard image is read normally.
                 DispatchQueue.main.async { self.isBusy = false }
-                self.recognise(images, kind: .text(nil), screenRect: screenRect, probe: probe)
+                self.recognise(images, kind: .text(nil), screenRect: screenRect, probe: probe, switches: switches)
             case .text(let override):
                 var options = Prefs.recognitionOptions(lineMode: override)
                 // One picture (a screen area, the clipboard, an image file): it may be about a QR code or barcode.
@@ -274,7 +354,8 @@ final class CaptureController {
                     } else {
                         self.output.deliver(text, kind: decision?.choice == .codesOnly ? .barcode : .text,
                                             note: exactLines > 0 ? "exact text from the app" : self.accessHint(screenRect),
-                                            result: result, picture: images.first, codes: offer)
+                                            result: result, picture: images.first, codes: offer,
+                                            switches: switches ?? .settings(lineMode: options.lineMode))
                     }
                 }
             }

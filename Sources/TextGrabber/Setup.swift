@@ -25,7 +25,7 @@ struct SetupView: View {
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var shortcut: String {
-        Shortcut.stored(for: .captureText)?.display ?? "no shortcut set"
+        Shortcut.stored(for: HotKeyAction.captureText)?.display ?? "no shortcut set"
     }
 
     var body: some View {

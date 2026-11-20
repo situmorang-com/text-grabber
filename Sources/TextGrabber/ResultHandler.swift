@@ -16,6 +16,24 @@ struct CodeOffer {
     var codesOnly: String
 }
 
+/// A self-test's stand-in for the clipboard and the speakers.
+final class DryRun {
+    /// Starts as the pretend clipboard text; holds what would have been copied.
+    var clipboard: String
+    var spoken: [String] = []
+    private(set) var events: [String] = []
+    var onRecord: (() -> Void)?
+
+    init(clipboard: String) {
+        self.clipboard = clipboard
+    }
+
+    func record(_ event: String) {
+        events.append(event)
+        onRecord?()
+    }
+}
+
 /// Everything that happens once text has been recognised: clipboard, history, HUD, speech, links.
 final class ResultHandler {
     let history = CaptureHistory.standard()
@@ -28,6 +46,11 @@ final class ResultHandler {
     private(set) var lastResult: CaptureResult?
     /// Open the editor for the next capture only ("Capture and Edit").
     var editNext = false
+    /// Self-test: clipboard and speech are recorded here instead of used; no history, confirmation or editor.
+    var dryRun: DryRun?
+    /// The clipboard text the last capture was added to (nil: it replaced the clipboard), and how.
+    private var additiveBase: String?
+    private var additiveNewLine = false
 
     var isSpeaking: Bool { synthesizer.isSpeaking }
 
@@ -46,13 +69,17 @@ final class ResultHandler {
         handler?(text)
     }
 
+    /// - Parameter switches: the capture's options (add to the clipboard, line breaks, read aloud); nil: the settings.
     func deliver(_ text: String, kind: ResultKind, note: String? = nil, result: CaptureResult? = nil, picture: CGImage? = nil,
-                 codes offer: CodeOffer? = nil) {
+                 codes offer: CodeOffer? = nil, switches: CaptureSwitches? = nil) {
         cancelProgress()
-        let openEditor = editNext || Prefs.bool(Prefs.Key.openEditor)
+        let switches = switches ?? .settings()
+        let openEditor = (editNext || Prefs.bool(Prefs.Key.openEditor)) && dryRun == nil
         editNext = false
         finishPending(text)
         guard !text.isEmpty else {
+            dryRun?.record("no text")
+            guard dryRun == nil else { return }
             hud.show(symbol: kind == .barcode ? "qrcode.viewfinder" : "text.magnifyingglass",
                      title: kind == .barcode ? "No code found" : "No text found", detail: nil)
             NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
@@ -60,30 +87,45 @@ final class ResultHandler {
             return
         }
 
-        copy(text)
-        if Prefs.bool(Prefs.Key.keepHistory) {
+        // A table never runs into the clipboard's last line, whatever format it is written in (CSV looks like prose).
+        let isTable = switches.additive && (result?.structured(lineMode: .paragraphs).hasTable ?? false)
+        let added = copy(text, switches: switches, textIsTable: isTable)
+        if Prefs.bool(Prefs.Key.keepHistory), dryRun == nil {
             history.add(text, kind: kind.rawValue, picture: Prefs.bool(Prefs.Key.historyPictures) ? picture : nil)
         }
-        lastResult = result ?? .fixed(text, kind: kind)
+        if dryRun == nil {
+            lastResult = result ?? .fixed(text, kind: kind)
+            if added, let base = additiveBase { lastResult?.addedTo = (base, additiveNewLine) }
+        }
+        // Read the capture itself, not everything on the clipboard: what was copied, and for a page with a code,
+        // its text without the link.
+        if switches.speak {
+            speak(offer.flatMap { $0.choice == .textAndCodes && !$0.textOnly.isEmpty ? $0.textOnly : nil } ?? text)
+        }
+        if let dryRun {
+            hud.hide()   // a "Reading text…" that showed while the test capture was read
+            dryRun.record("delivered (\(added ? (additiveNewLine ? "added on a new line" : "added on the same line") : "replaced the clipboard"))")
+            return
+        }
         if openEditor, let lastResult {
             editor.show(lastResult)
             return
         }
 
         let words = text.split(whereSeparator: \.isWhitespace).count
-        let additive = Prefs.bool(Prefs.Key.additive)
         if let offer {
             confirmCodes(offer, copied: text, kind: kind)
         } else {
-        hud.show(symbol: "checkmark.circle.fill",
-                 title: additive ? "Added to clipboard" : "Copied",
-                 detail: preview(text),
-                 footnote: "\(words) word\(words == 1 ? "" : "s") · \(text.count) characters" + (note.map { " · " + $0 } ?? ""))
+            var footnote = "\(words) word\(words == 1 ? "" : "s") · \(text.count) characters"
+            if added { footnote += additiveNewLine ? " · on a new line" : " · on the same line" }
+            if let note { footnote += " · " + note }
+            hud.show(symbol: added ? "plus.square.on.square" : "checkmark.circle.fill",
+                     title: added ? "Added to clipboard" : "Copied",
+                     detail: preview(text), footnote: footnote)
         }
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
-                             userInfo: [.announcement: "Text copied to clipboard"])
+                             userInfo: [.announcement: added ? "Text added to clipboard" : "Text copied to clipboard"])
 
-        if Prefs.bool(Prefs.Key.speak) { speak(text) }
         if Prefs.bool(Prefs.Key.openLinks) {
             // Only when the capture is plainly "a link": one link, and little else around it.
             let links = Links.find(in: text)
@@ -109,10 +151,13 @@ final class ResultHandler {
             : extra.isEmpty ? offer.textOnly : offer.textOnly + "\n\n" + CodeTriage.codesText(extra)
 
         var current = copied
+        // What this capture was added to, if anything: a choice made here goes in the same place.
+        let base = additiveBase
+        let newLine = additiveNewLine
         let copy = { [weak self] (new: String, newKind: ResultKind, message: String) in
             guard let self else { return }
             if new != current {
-                self.replaceCopied(current, with: new, kind: newKind)
+                self.replaceCopied(current, with: new, kind: newKind, addedTo: base, newLine: newLine)
                 current = new
             }
             self.hud.show(symbol: "checkmark.circle.fill", title: message, detail: self.preview(new))
@@ -156,11 +201,9 @@ final class ResultHandler {
     }
 
     /// The clipboard, history and "Edit Last Capture" switch from what a capture copied to another version of it.
-    private func replaceCopied(_ old: String, with new: String, kind: ResultKind) {
-        if Prefs.bool(Prefs.Key.additive), Prefs.additiveBuffer.hasSuffix(old) {
-            let buffer = String(Prefs.additiveBuffer.dropLast(old.count)) + new
-            Prefs.additiveBuffer = buffer
-            write(buffer)
+    private func replaceCopied(_ old: String, with new: String, kind: ResultKind, addedTo base: String?, newLine: Bool) {
+        if let base {
+            write(AdditiveText.append(new, to: base, newLine: newLine, isWord: Dictionary.isWholeWord))
         } else {
             write(new)
         }
@@ -180,25 +223,51 @@ final class ResultHandler {
 
     // MARK: Clipboard
 
-    func copy(_ text: String) {
-        var value = text
-        if Prefs.bool(Prefs.Key.additive) {
-            let buffer = Prefs.additiveBuffer
-            value = buffer.isEmpty ? text : buffer + "\n" + text
-            Prefs.additiveBuffer = value
+    /// Puts a capture on the clipboard: in place of what is there, or, when `switches.additive`, after the text
+    /// already on it (on the same line, or a new one with `switches.keepLines`; see `AdditiveText`).
+    /// - Returns: whether it was added to earlier text. A clipboard with no text (an image, nothing) is replaced.
+    @discardableResult
+    func copy(_ text: String, switches: CaptureSwitches, textIsTable: Bool = false) -> Bool {
+        additiveBase = nil
+        additiveNewLine = switches.keepLines
+        guard switches.additive, let base = clipboardText(), !base.allSatisfy(\.isWhitespace) else {
+            write(text)
+            return false
         }
-        write(value)
+        additiveBase = base
+        write(AdditiveText.append(text, to: base, newLine: switches.keepLines, textIsTable: textIsTable, isWord: Dictionary.isWholeWord))
+        return true
     }
 
     func write(_ text: String) {
+        if let dryRun {
+            dryRun.clipboard = text
+            return
+        }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
     }
 
+    /// The clipboard's text, when it is text a capture may be added to. A password (marked concealed or transient
+    /// by password managers) or copied files (whose text is only their names) count as no text: they are replaced.
+    private func clipboardText() -> String? {
+        if let dryRun { return dryRun.clipboard }
+        let pasteboard = NSPasteboard.general
+        let types = Set((pasteboard.types ?? []).map(\.rawValue))
+        let notText: Set<String> = ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType", "public.file-url",
+                                    NSPasteboard.PasteboardType.fileURL.rawValue]
+        guard types.isDisjoint(with: notText) else { return nil }
+        return pasteboard.string(forType: .string)
+    }
+
     // MARK: Speech
 
     func speak(_ text: String) {
+        if let dryRun {
+            dryRun.spoken.append(text)
+            return
+        }
         synthesizer.stopSpeaking(at: .immediate)
         let utterance = AVSpeechUtterance(string: text)
         utterance.rate = Float(Prefs.defaults.double(forKey: Prefs.Key.speechRate))
@@ -241,6 +310,11 @@ final class ResultHandler {
 final class HUD {
     private var panel: NSPanel?
     private var dismissal: DispatchWorkItem?
+
+    func hide() {
+        dismissal?.cancel()
+        panel?.orderOut(nil)
+    }
     func show(symbol: String, title: String, detail: String?, footnote: String? = nil, stays: Bool = false) {
         guard Prefs.bool(Prefs.Key.showHUD) else { return }
         dismissal?.cancel()

@@ -151,7 +151,14 @@ public struct DocumentLayout {
             let spaced: Bool = {
                 guard let previous else { return false }
                 if unit.box.minY < previous.minY - lineHeight * 0.5 || !Self.sameColumn(unit.box, previous) { return true }
-                return unit.box.minY - previous.maxY > leading + lineHeight * 0.45
+                let gap = unit.box.minY - previous.maxY
+                // A short heading set close to its text gets no blank line after it, though its gap can exceed the
+                // general threshold. Measured (macOS 27.3): a heading 0.45 line heights (beyond the line spacing)
+                // above its text; a title set further off, 0.74, keeps its blank line. Lists are never headings.
+                if case .text(let heading, _)? = blocks.last, Self.isHeading(heading), gap <= leading + lineHeight * 0.6 {
+                    return false
+                }
+                return gap > leading + lineHeight * 0.45
             }()
             switch unit.kind {
             case .paragraph(let p):
@@ -226,6 +233,12 @@ public struct DocumentLayout {
             }
         }
         return LayoutEngine.tidy(output)
+    }
+
+    /// A heading: one short line that does not end like a sentence or lead into a list ("Fast and efficient").
+    static func isHeading(_ text: String) -> Bool {
+        guard !text.contains("\n"), let last = text.last, last.isLetter || last.isNumber else { return false }
+        return text.split(separator: " ").count <= 6 && ExactText.splitListMarker(text).marker.isEmpty
     }
 
     /// Recursive XY cut: split at a vertical gap that no item crosses (left, then right); failing that, split at

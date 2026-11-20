@@ -119,4 +119,13 @@ final class DocumentLayoutTests: XCTestCase {
         XCTAssertTrue(text.hasTable)
         XCTAssertEqual(text.render(.markdown), "Intro line\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nOutro")
     }
+
+    /// From a real settings window: a heading and its text, set further apart than lines of a paragraph.
+    func testAHeadingStaysOnTheTextItIntroduces() {
+        let fragments = [line("Fast and efficient", x: 10, y: 10), line("Recognition runs on your Mac.", x: 10, y: 42),
+                         line("Private by design", x: 10, y: 110), line("Nothing leaves your Mac.", x: 10, y: 142)]
+        let structure = DocumentStructure(paragraphs: fragments.map(\.box), tables: [])
+        XCTAssertEqual(layout.compose(fragments, structure: structure).render(),
+                       "Fast and efficient\nRecognition runs on your Mac.\n\nPrivate by design\nNothing leaves your Mac.")
+    }
 }

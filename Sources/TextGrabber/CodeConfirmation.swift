@@ -22,14 +22,7 @@ final class CodeConfirmation {
     }
 
     struct Content {
-        var symbol: String
-        /// Small line above the title: what happened ("Link from QR code copied").
-        var caption: String
-        var title: String
-        var titleIsCode = false
-        var detail: String?
-        /// A link shown as its own row under the text (text and code captures).
-        var linkRow: String?
+        var card: CardContent
         var primary: Action
         /// Run by esc and shown as a button with an "esc" hint; nil: esc only closes.
         var escape: Action?
@@ -45,13 +38,20 @@ final class CodeConfirmation {
         self.content = content
         let takesKeyboard = AccessibilityText.isTrusted
 
-        let view = CodeConfirmationView(
-            content: content,
-            keyHints: takesKeyboard,
-            choose: { [weak self] choice in self?.choose(choice) },
-            hovering: { [weak self] inside in
-                if inside { self?.dismissal?.cancel() } else { self?.scheduleClose(after: 3) }
+        // The main action first, at the start of the text column; then esc's, then the ⌘ ones.
+        var buttons = [CardButton(title: content.primary.title, key: "⏎", prominent: true) { [weak self] in self?.choose(.primary) }]
+        if let escape = content.escape {
+            buttons.append(CardButton(title: escape.title, key: "⎋") { [weak self] in self?.choose(.cancel) })
+        }
+        for (index, action) in content.secondary.enumerated() {
+            buttons.append(CardButton(title: action.title, key: action.commandKey.map { "⌘" + String($0).uppercased() }) { [weak self] in
+                self?.choose(.secondary(index))
             })
+        }
+        let card = ConfirmationCardView.sized(content.card, buttons: buttons, keyHints: takesKeyboard)
+        let view = card.onHover { [weak self] inside in
+            if inside { self?.dismissal?.cancel() } else { self?.scheduleClose(after: 3) }
+        }
         let host = FirstClickHostingView(rootView: view)
         host.layoutSubtreeIfNeeded()
         let size = host.fittingSize
@@ -59,6 +59,7 @@ final class CodeConfirmation {
         let panel = KeyPanel(contentRect: NSRect(origin: .zero, size: size),
                              styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.takesKeyboard = takesKeyboard
+        panel.title = WindowSnapshot.titles["codes"] ?? ""
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -173,7 +174,7 @@ private final class FirstClickHostingView<Content: View>: NSHostingView<Content>
 /// Frosted glass: a see-through tint in the panel's rounded shape and a fine light edge, over what the window
 /// server blurs behind the panel. It keeps the colour of what is behind, where system materials turn grey.
 final class FrostedSurface: NSView {
-    static let cornerRadius: CGFloat = 20
+    static let cornerRadius: CGFloat = 16
 
     override var isOpaque: Bool { false }
 
@@ -206,125 +207,5 @@ final class FrostedSurface: NSView {
               let connection = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGSDefaultConnectionForThread"),
               let setBlur = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGSSetWindowBackgroundBlurRadius") else { return }
         _ = unsafeBitCast(setBlur, to: SetBlur.self)(unsafeBitCast(connection, to: Connection.self)(), Int32(window.windowNumber), radius)
-    }
-}
-
-// MARK: - Content
-
-private struct CodeConfirmationView: View {
-    let content: CodeConfirmation.Content
-    let keyHints: Bool
-    let choose: (CodeConfirmation.Choice) -> Void
-    let hovering: (Bool) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top, spacing: 14) {
-                badge
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                        Text(content.caption)
-                    }
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-
-                    Text(content.title)
-                        .font(content.titleIsCode ? .system(size: 14, weight: .semibold, design: .monospaced)
-                                                  : .system(size: 18, weight: .semibold))
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let detail = content.detail {
-                        Text(detail)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(content.linkRow == nil ? 2 : 3)
-                            // A link loses its middle (the site and the end stay visible); prose loses its end.
-                            .truncationMode(content.linkRow == nil ? .middle : .tail)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let link = content.linkRow {
-                        HStack(spacing: 6) {
-                            Image(systemName: "link")
-                            Text(link).lineLimit(1).truncationMode(.middle)
-                        }
-                        .font(.system(size: 12, weight: .medium))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(Color.primary.opacity(0.07)))
-                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
-                        .padding(.top, 4)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-
-            HStack(spacing: 8) {
-                ForEach(Array(content.secondary.enumerated()), id: \.offset) { index, action in
-                    Button { choose(.secondary(index)) } label: {
-                        label(action.title, key: action.commandKey.map { "⌘" + String($0).uppercased() })
-                    }
-                    .buttonStyle(GlassButton()).focusable(false)
-                }
-                Spacer(minLength: 8)
-                if let escape = content.escape {
-                    Button { choose(.cancel) } label: { label(escape.title, key: "⎋") }.buttonStyle(GlassButton()).focusable(false)
-                }
-                Button { choose(.primary) } label: { label(content.primary.title, key: "⏎") }
-                    .buttonStyle(GlassButton(prominent: true)).focusable(false)
-            }
-        }
-        .padding(18)
-        .frame(width: 480)
-        // ↩ and esc belong to the panel; no button takes keyboard focus or draws a focus ring.
-        .focusEffectDisabled()
-        .onHover(perform: hovering)
-    }
-
-    private var badge: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(LinearGradient(colors: [Color.accentColor, Color.accentColor.opacity(0.65)],
-                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.35), lineWidth: 0.5))
-            .overlay(Image(systemName: content.symbol).font(.system(size: 20, weight: .semibold)).foregroundStyle(.white))
-            .frame(width: 44, height: 44)
-            .shadow(color: Color.accentColor.opacity(0.35), radius: 6, y: 3)
-    }
-
-    @ViewBuilder
-    private func label(_ title: String, key: String?) -> some View {
-        HStack(spacing: 6) {
-            Text(title)
-            if keyHints, let key {
-                Text(key)
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.white.opacity(0.22)))
-            }
-        }
-    }
-}
-
-/// A capsule button for glass: translucent, with a fine light edge; the prominent one in the accent colour.
-private struct GlassButton: ButtonStyle {
-    var prominent = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: prominent ? .semibold : .medium))
-            .lineLimit(1)
-            .fixedSize()
-            .foregroundStyle(prominent ? Color.white : Color.primary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-                Capsule().fill(prominent ? AnyShapeStyle(Color.accentColor.gradient) : AnyShapeStyle(Color.primary.opacity(0.08)))
-            )
-            .overlay(Capsule().strokeBorder(Color.white.opacity(prominent ? 0.3 : 0.2), lineWidth: 0.5))
-            .opacity(configuration.isPressed ? 0.7 : 1)
-            .contentShape(Capsule())
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import AVFoundation
 import NaturalLanguage
 import TextGrabberCore
@@ -179,25 +180,53 @@ final class ResultHandler {
             }
         } ?? CodeConfirmation.Action(title: "Done") {}
 
-        let content: CodeConfirmation.Content
+        let card: CardContent
         if offer.choice == .textAndCodes {
-            let lines = offer.textOnly.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-            let rest = lines.dropFirst().joined(separator: " ")
-            content = CodeConfirmation.Content(
-                symbol: symbol, caption: "Text and \(name.lowercasedFirst) copied",
-                title: lines.first ?? "", detail: rest.isEmpty ? nil : rest,
-                linkRow: link?.absoluteString ?? offer.codesOnly.replacingOccurrences(of: "\n", with: "  ·  "),
-                primary: primary, escape: escape, secondary: secondary)
+            card = CardContent(
+                symbol: symbol, tint: .accentColor, headline: "Text and \(name.lowercasedFirst) copied",
+                text: preview(offer.textOnly),
+                chip: link?.absoluteString ?? offer.codesOnly.replacingOccurrences(of: "\n", with: "  ·  "),
+                chipSymbol: link != nil ? "link" : symbol)
+        } else if let link {
+            // The site in large type: it is what to check before opening a link from a code.
+            card = CardContent(symbol: symbol, tint: .accentColor, headline: "Link from \(name.lowercasedFirst) copied",
+                               text: link.host ?? link.absoluteString, style: .prominent, detail: link.absoluteString)
         } else {
-            content = CodeConfirmation.Content(
-                symbol: symbol,
-                caption: link != nil ? "Link from \(name.lowercasedFirst) copied" : "\(name.uppercasedFirst) copied",
-                // The site in large type: it is what to check before opening a link from a code.
-                title: link?.host ?? offer.codesOnly, titleIsCode: link == nil,
-                detail: link?.absoluteString,
-                primary: primary, escape: escape, secondary: secondary)
+            // Only the code, and nothing to choose: the notice every capture shows, not a panel to dismiss.
+            let digits = offer.codesOnly.allSatisfy(\.isNumber)
+            hud.show(symbol: symbol, title: "\(name.uppercasedFirst) copied", detail: offer.codesOnly, detailIsCode: true,
+                     footnote: offer.codes.count > 1 ? nil : "\(offer.codesOnly.count) \(digits ? "digits" : "characters")")
+            return
         }
-        codeConfirmation.show(content)
+        codeConfirmation.show(CodeConfirmation.Content(card: card, primary: primary, escape: escape, secondary: secondary))
+    }
+
+    /// Shows a card with made-up content, for checking how it looks (textgrabber://demo?card=…). Copies nothing.
+    func showDemo(_ name: String) {
+        switch name {
+        case "barcode":
+            hud.show(symbol: "barcode", title: "Barcode copied", detail: "020590016345026", detailIsCode: true, footnote: "15 digits")
+        case "link":
+            codeConfirmation.show(.init(card: CardContent(
+                symbol: "qrcode", tint: .accentColor, headline: "Link from QR code copied", text: "example.com", style: .prominent,
+                detail: "https://example.com/menu/table-12?lang=en"), primary: .init(title: "Open Link") {}))
+        case "textcode":
+            codeConfirmation.show(.init(card: CardContent(
+                symbol: "qrcode", tint: .accentColor, headline: "Text and QR code copied",
+                text: preview("Scan to see today's menu\nOrder at the counter and pay by card"),
+                chip: "https://example.com/menu", chipSymbol: "link"),
+                primary: .init(title: "Open Link") {}, escape: .init(title: "Both") {},
+                secondary: [.init(title: "Text", commandKey: "c") {}, .init(title: "QR", commandKey: "l") {}]))
+        case "long":
+            hud.show(symbol: "checkmark.circle.fill", title: "Copied",
+                     detail: preview("The quick brown fox jumps over the lazy dog, then runs across the field to the river where it stops to drink before heading home again."),
+                     footnote: "27 words · 141 characters")
+        case "added":
+            hud.show(symbol: "plus.square.on.square", title: "Added to clipboard", detail: "+62 812-555-0199",
+                     footnote: "1 word · 16 characters · on a new line")
+        default:
+            hud.show(symbol: "checkmark.circle.fill", title: "Copied", detail: "020590016345026", footnote: "1 word · 15 characters")
+        }
     }
 
     /// The clipboard, history and "Edit Last Capture" switch from what a capture copied to another version of it.
@@ -315,77 +344,33 @@ final class HUD {
         dismissal?.cancel()
         panel?.orderOut(nil)
     }
-    func show(symbol: String, title: String, detail: String?, footnote: String? = nil, stays: Bool = false) {
+    /// - Parameter detailIsCode: the detail is a code's contents, shown in monospaced type.
+    func show(symbol: String, title: String, detail: String?, detailIsCode: Bool = false, footnote: String? = nil, stays: Bool = false) {
         guard Prefs.bool(Prefs.Key.showHUD) else { return }
         dismissal?.cancel()
         panel?.orderOut(nil)
 
-        let icon = NSImageView()
-        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 26, weight: .medium))
-        icon.contentTintColor = symbol.hasPrefix("exclamationmark") ? .systemOrange : .labelColor
-        icon.setContentHuggingPriority(.required, for: .horizontal)
+        let card = ConfirmationCardView.sized(CardContent(
+            symbol: symbol, tint: CardContent.tint(for: symbol), headline: title,
+            text: detail, style: detailIsCode ? .code : .preview, footnote: footnote))
+        let host = NSHostingView(rootView: card)
+        let size = host.fittingSize
+        let surface = FrostedSurface(frame: NSRect(origin: .zero, size: size))
+        host.frame = surface.bounds
+        host.autoresizingMask = [.width, .height]
+        surface.addSubview(host)
 
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
-
-        let textStack = NSStackView(views: [titleLabel])
-        textStack.orientation = .vertical
-        textStack.alignment = .leading
-        textStack.spacing = 3
-        if let detail, !detail.isEmpty {
-            let label = NSTextField(wrappingLabelWithString: detail)
-            label.font = .systemFont(ofSize: 12)
-            label.textColor = .secondaryLabelColor
-            label.maximumNumberOfLines = 3
-            // Tail truncation on the label itself would make it one line; truncate only the last visible line.
-            label.lineBreakMode = .byWordWrapping
-            label.cell?.truncatesLastVisibleLine = true
-            label.preferredMaxLayoutWidth = 290
-            textStack.addArrangedSubview(label)
-        }
-        if let footnote {
-            let label = NSTextField(labelWithString: footnote)
-            label.font = .systemFont(ofSize: 11)
-            label.textColor = .tertiaryLabelColor
-            textStack.addArrangedSubview(label)
-        }
-
-        let row = NSStackView(views: [icon, textStack])
-        row.orientation = .horizontal
-        row.alignment = .top
-        row.spacing = 12
-        row.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 14, right: 18)
-        row.translatesAutoresizingMaskIntoConstraints = false
-
-        let background = NSVisualEffectView()
-        background.material = .hudWindow
-        background.blendingMode = .behindWindow
-        background.state = .active
-        background.wantsLayer = true
-        background.layer?.cornerRadius = 14
-        background.layer?.cornerCurve = .continuous
-        background.layer?.masksToBounds = true
-        background.addSubview(row)
-        NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: background.leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: background.trailingAnchor),
-            row.topAnchor.constraint(equalTo: background.topAnchor),
-            row.bottomAnchor.constraint(equalTo: background.bottomAnchor),
-            background.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
-            background.widthAnchor.constraint(lessThanOrEqualToConstant: 370),
-        ])
-
-        let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        let panel = NSPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.title = WindowSnapshot.titles["hud"] ?? ""
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.level = .statusBar
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
-        panel.contentView = background
-        background.layoutSubtreeIfNeeded()
-        let size = background.fittingSize
+        panel.isReleasedWhenClosed = false
+        panel.contentView = surface
 
         // On the screen the pointer is on, a little above the bottom edge.
         let mouse = NSEvent.mouseLocation
@@ -395,6 +380,7 @@ final class HUD {
                               width: size.width, height: size.height), display: true)
         panel.alphaValue = 1
         panel.orderFrontRegardless()
+        FrostedSurface.blurBehind(panel)
         self.panel = panel
 
         guard !stays else { return }

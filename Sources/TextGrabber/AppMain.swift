@@ -131,6 +131,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 WindowSnapshot.write(name: name)
                 if !wasOpen, value("keep") != "1" { WindowSnapshot.window(named: name)?.orderOut(nil) }
             }
+        case "demo":
+            // textgrabber://demo?card=copied|barcode|link|textcode|long|added: shows a card with made-up content.
+            // With snapshot=1 it is drawn to a PNG too (window hud or codes in the capture log's folder).
+            let card = value("card") ?? "copied"
+            output.showDemo(card)
+            if value("snapshot") == "1" {
+                let name = ["link", "textcode"].contains(card) ? "codes" : "hud"
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { WindowSnapshot.write(name: name) }
+            }
         case "hide":
             WindowSnapshot.window(named: value("window") ?? "")?.orderOut(nil)
         default:

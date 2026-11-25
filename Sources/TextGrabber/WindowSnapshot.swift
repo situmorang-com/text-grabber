@@ -10,6 +10,9 @@ enum WindowSnapshot {
         "settings": "TextGrabber Settings",
         "history": "Capture History",
         "editor": "Captured Text",
+        // Shown by textgrabber://demo?card=…, never with a title bar.
+        "hud": "TextGrabber Notice",
+        "codes": "TextGrabber Code Confirmation",
     ]
 
     /// Set while a window is opened for a snapshot: it is shown without taking focus from the user's app.

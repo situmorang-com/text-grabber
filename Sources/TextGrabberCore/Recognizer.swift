@@ -25,6 +25,8 @@ public struct RecognitionOptions {
     public var useDocumentStructure = true
     /// Also look for QR codes and barcodes, in parallel with the text (`RecognitionResult.codes`).
     public var readCodes = false
+    /// Paint out pieces of letters the selection cut through at its edges (`ImagePrep.removingEdgeSlivers`).
+    public var removeEdgeSlivers = true
 
     public init() {}
 
@@ -115,6 +117,8 @@ public enum Recognizer {
                 found.codes = (try? readCodes(in: image)) ?? []
             }
         }
+        // Codes are read from the capture as it is; text from the capture without letters cut at its edges.
+        let image = options.removeEdgeSlivers ? ImagePrep.removingEdgeSlivers(image).image : image
         var working = image
         var upscaled = false
         // A small capture is enlarged before the first pass: at its own size, isolated characters go missing.
@@ -152,6 +156,7 @@ public enum Recognizer {
             // What was read inside a code is its squares, not text: not worth a second reading.
             fragments = retryUncertain(fragments, in: working, options: options,
                                        skip: { box in codes.contains { CodeTriage.share(of: box, inside: $0.box) > 0.5 } })
+            fragments = retryGarbledTails(fragments, in: working, options: options)
         }
         let structure = options.useDocumentStructure && !fragments.isEmpty ? readStructure(in: working) : nil
         if let structure, !structure.tables.isEmpty {
@@ -219,6 +224,57 @@ public enum Recognizer {
             }
         }
         return result
+    }
+
+    /// Small underlined text (a phone number in a chat) sometimes comes back with made-up accented letters after
+    /// its last digit, with full confidence: "+62 812-555-0199Řšź" for "+62 812-555-0199.", "…-425Ś" for "…-425".
+    /// The same line read at another size is clean; failing that, the made-up letters are dropped.
+    static func retryGarbledTails(_ fragments: [TextFragment], in image: CGImage, options: RecognitionOptions) -> [TextFragment] {
+        var result = fragments
+        var retries = 0
+        for index in result.indices {
+            guard let tail = garbledTail(result[index].text), retries < 6 else { continue }
+            retries += 1
+            let kept = String(result[index].text[..<tail.lowerBound])
+            let box = result[index].box
+            let width = CGFloat(image.width), height = CGFloat(image.height)
+            let pad = box.height * height * 0.35
+            let crop = CGRect(x: box.minX * width - pad, y: box.minY * height - pad,
+                              width: box.width * width + pad * 2, height: box.height * height + pad * 2)
+                .intersection(CGRect(x: 0, y: 0, width: width, height: height)).integral
+            var replacement = kept
+            if crop.height >= 4, let cropped = image.cropping(to: crop) {
+                for scale: CGFloat in [1, 1.5, 0.75] {
+                    guard let sized = scale == 1 ? cropped : ImagePrep.scaled(cropped, by: scale),
+                          let lines = try? fragmentsOrNil(in: sized, level: .accurate, options: options), !lines.isEmpty else { continue }
+                    let text = lines.sorted { $0.box.minX < $1.box.minX }.map(\.text).joined(separator: " ")
+                    // Only a reading of the same words, now without the made-up ending.
+                    if garbledTail(text) == nil, text.hasPrefix(kept), text.count <= kept.count + 2 { replacement = text; break }
+                }
+            }
+            result[index].text = replacement
+            result[index].wordBoxes = []
+        }
+        return result
+    }
+
+    /// The made-up ending of a line: one to four accented Latin letters straight after a digit, in a line that
+    /// has no other accented letters. Nil when the line has no such ending.
+    static func garbledTail(_ text: String) -> Range<String.Index>? {
+        func accented(_ character: Character) -> Bool {
+            character.isLetter && character.unicodeScalars.allSatisfy { (0xC0...0x24F).contains($0.value) && $0.value != 0xD7 && $0.value != 0xF7 }
+        }
+        var start = text.endIndex
+        var count = 0
+        while start > text.startIndex, count < 5 {
+            let previous = text.index(before: start)
+            guard accented(text[previous]) else { break }
+            start = previous
+            count += 1
+        }
+        guard (1...4).contains(count), start > text.startIndex, text[text.index(before: start)].isNumber,
+              !text[..<start].contains(where: accented) else { return nil }
+        return start..<text.endIndex
     }
 
     private static func fragmentsOrNil(in image: CGImage, level: VNRequestTextRecognitionLevel, options: RecognitionOptions) throws -> [TextFragment]? {

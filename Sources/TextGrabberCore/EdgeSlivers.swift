@@ -99,6 +99,31 @@ extension ImagePrep {
         return cleaned.map { ($0, removed) } ?? (image, 0)
     }
 
+    /// Where the ink is in an image (top-left origin, pixels), or nil when it is all background.
+    static func inkBounds(_ image: CGImage) -> CGRect? {
+        let width = image.width, height = image.height
+        guard width >= 2, height >= 2 else { return nil }
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let space = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                                          space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn, let background = edgeBackground(pixels, width: width, height: height) else { return nil }
+        var minX = width, minY = height, maxX = -1, maxY = -1
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                let difference = max(abs(Int(pixels[offset]) - background.0), abs(Int(pixels[offset + 1]) - background.1),
+                                     abs(Int(pixels[offset + 2]) - background.2))
+                if difference > 64 { minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y) }
+            }
+        }
+        return maxX < 0 ? nil : CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+    }
+
     /// The colour most of the capture's border has, or nil when the border has no main colour (a photo).
     private static func edgeBackground(_ pixels: [UInt8], width: Int, height: Int) -> (Int, Int, Int)? {
         var counts: [Int: (count: Int, r: Int, g: Int, b: Int)] = [:]

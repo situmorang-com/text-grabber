@@ -182,8 +182,32 @@ public enum Recognizer {
             budget -= 1
             let pixels = CGRect(x: cell.minX * width, y: cell.minY * height, width: cell.width * width, height: cell.height * height)
                 .intersection(CGRect(x: 0, y: 0, width: width, height: height)).integral
-            guard pixels.width >= 8, pixels.height >= 8, let crop = image.cropping(to: pixels),
-                  let lines = try? fragmentsOrNil(in: crop, level: .accurate, options: options) else { continue }
+            guard pixels.width >= 8, pixels.height >= 8, let crop = image.cropping(to: pixels) else { continue }
+            var lines = (try? fragmentsOrNil(in: crop, level: .accurate, options: options)) ?? []
+            // A lone digit ("3" in a Seats column) is skipped by the accurate model at every size, alone or padded;
+            // the fast model reads it from the ink alone, cropped tight and enlarged, best without language
+            // correction. Which size works varies, so a few are tried.
+            if lines.isEmpty, let ink = ImagePrep.inkBounds(crop),
+               let tight = crop.cropping(to: ink.insetBy(dx: -3, dy: -3).intersection(CGRect(x: 0, y: 0, width: crop.width, height: crop.height))) {
+                for targetHeight in [90.0, 60, 130] where lines.isEmpty {
+                    guard let enlarged = ImagePrep.scaled(tight, by: min(max(targetHeight / CGFloat(tight.height), 0.5), 8)) else { continue }
+                    let read = ((try? fragmentsOrNil(in: enlarged, level: .fast, options: options, languageCorrection: false)) ?? [])
+                        .filter { $0.confidence >= 0.5 }
+                    // Back from the tight crop's coordinates to the cell's.
+                    lines = read.map { line in
+                        var line = line
+                        let map = { (box: CGRect) in
+                            CGRect(x: (ink.minX - 3 + box.minX * CGFloat(tight.width)) / CGFloat(crop.width),
+                                   y: (ink.minY - 3 + box.minY * CGFloat(tight.height)) / CGFloat(crop.height),
+                                   width: box.width * CGFloat(tight.width) / CGFloat(crop.width),
+                                   height: box.height * CGFloat(tight.height) / CGFloat(crop.height))
+                        }
+                        line.box = map(line.box)
+                        line.wordBoxes = line.wordBoxes.map(map)
+                        return line
+                    }
+                }
+            }
             for var line in lines where !line.text.trimmingCharacters(in: .whitespaces).isEmpty {
                 // From the cell's coordinates back to the whole picture's.
                 let map = { (box: CGRect) in
@@ -277,10 +301,11 @@ public enum Recognizer {
         return start..<text.endIndex
     }
 
-    private static func fragmentsOrNil(in image: CGImage, level: VNRequestTextRecognitionLevel, options: RecognitionOptions) throws -> [TextFragment]? {
+    private static func fragmentsOrNil(in image: CGImage, level: VNRequestTextRecognitionLevel, options: RecognitionOptions,
+                                       languageCorrection: Bool = true) throws -> [TextFragment]? {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = level
-        request.usesLanguageCorrection = true
+        request.usesLanguageCorrection = languageCorrection
         request.automaticallyDetectsLanguage = options.detectsLanguage
         request.customWords = options.customWords
         if let preferred = options.preferredLanguage,

@@ -1,0 +1,4 @@
+Plan	Seats	Monthly	Owner
+Basic	3	€0	Rina
+Plus	10	€40	Dewi
+Team	25	€90	Budi

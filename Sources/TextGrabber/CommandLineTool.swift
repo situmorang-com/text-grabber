@@ -13,6 +13,7 @@ enum CommandLineTool {
       --no-codes                      Read only text (by default a capture that is about a code gives the code)
       --no-upscale                    Do not enlarge small images first
       --scale <n>                     Enlarge by exactly n before reading (experiments)
+      --no-detect-language            Use the listed languages as they are, without detecting one
       --no-edge-trim                  Keep pieces of letters cut at the image's edges
       --no-retry                      Do not re-read uncertain lines from an enlarged crop
       --no-structure                  Do not use Apple's document recognition for paragraphs and tables
@@ -51,6 +52,7 @@ enum CommandLineTool {
             case "--no-upscale": options.upscaleSmallImages = false
             case "--scale": options.forcedScale = Double(iterator.next() ?? "").map { CGFloat($0) }
             case "--no-edge-trim": options.removeEdgeSlivers = false
+            case "--no-detect-language": options.detectsLanguage = false
             case "--no-retry": options.retryUncertainLines = false
             case "--no-structure": options.useDocumentStructure = false
             case "--markdown": format = .markdown

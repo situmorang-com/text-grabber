@@ -43,6 +43,8 @@ struct CardButton {
     /// Shown as a key hint: "⏎", "⎋", "⌘C".
     var key: String?
     var prominent = false
+    /// At the card's trailing edge (the main action and its alternative), or under the text (the others).
+    var trailing = false
     var action: () -> Void
 }
 
@@ -58,46 +60,62 @@ struct ConfirmationCardView: View {
     /// nil: as wide as the content wants (to measure it); otherwise the card's width.
     var width: CGFloat?
 
+    /// The Mac's button order: the main action at the bottom right, the one esc runs just left of it, the others
+    /// at the left edge of the text column. A single action sits beside the text instead of on a row of its own.
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: Self.columnSpacing) {
                 tile
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(content.headline)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                    if let text = content.text, !text.isEmpty { copied(text) }
-                    if let detail = content.detail {
-                        wrapping(Text(detail).font(.system(size: 12)).foregroundStyle(.secondary), lines: 2, truncation: .middle)
-                    }
-                    if let chip = content.chip { self.chip(chip) }
-                    if let footnote = content.footnote {
-                        Text(footnote)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .padding(.top, 1)
-                    }
+                info
+                if buttons.count == 1 {
+                    Spacer(minLength: 8)
+                    button(buttons[0])
                 }
-                .frame(maxWidth: width == nil ? nil : .infinity, alignment: .leading)
             }
-            if !buttons.isEmpty {
+            if buttons.count > 1 {
                 HStack(spacing: 8) {
-                    ForEach(Array(buttons.enumerated()), id: \.offset) { _, button in
-                        Button(action: button.action) { label(button) }
-                            .buttonStyle(GlassButton(prominent: button.prominent))
-                            .focusable(false)
-                    }
+                    ForEach(Array(buttons.enumerated()).filter { !$0.element.trailing }, id: \.offset) { _, item in button(item) }
+                    Spacer(minLength: 16)
+                    ForEach(Array(buttons.enumerated()).filter { $0.element.trailing }, id: \.offset) { _, item in button(item) }
                 }
-                // Under the text column, not under the tile.
+                // Starts under the text column, not under the tile.
                 .padding(.leading, Self.tileSize + Self.columnSpacing)
             }
         }
         .padding(.vertical, 14)
         .padding(.leading, 14)
-        .padding(.trailing, 20)
+        .padding(.trailing, 16)
         .frame(width: width, alignment: .leading)
         .focusEffectDisabled()
+    }
+
+    private var info: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(content.headline)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+            if let text = content.text, !text.isEmpty { copied(text) }
+            if let detail = content.detail {
+                // One line: a link loses its middle, so the site and the end stay visible.
+                wrapping(Text(detail).font(.system(size: 12)).foregroundStyle(.secondary), lines: 1, truncation: .middle)
+            }
+            if let chip = content.chip { self.chip(chip) }
+            if let footnote = content.footnote {
+                Text(footnote)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .padding(.top, 1)
+            }
+        }
+        .frame(maxWidth: width == nil || buttons.count == 1 ? nil : .infinity, alignment: .leading)
+        .layoutPriority(1)
+    }
+
+    private func button(_ button: CardButton) -> some View {
+        Button(action: button.action) { label(button) }
+            .buttonStyle(GlassButton(prominent: button.prominent))
+            .focusable(false)
     }
 
     private var tile: some View {
@@ -162,7 +180,10 @@ extension ConfirmationCardView {
     /// in a wide empty panel and a long text wraps.
     static func sized(_ content: CardContent, buttons: [CardButton] = [], keyHints: Bool = false) -> ConfirmationCardView {
         let natural = NSHostingView(rootView: ConfirmationCardView(content: content, buttons: buttons, keyHints: keyHints))
-        let width = min(max(natural.fittingSize.width.rounded(.up), minWidth), maxWidth)
+        // The buttons never wrap or shrink: the card is at least as wide as they need.
+        let bare = CardContent(symbol: content.symbol, tint: content.tint, headline: "")
+        let forButtons = NSHostingView(rootView: ConfirmationCardView(content: bare, buttons: buttons, keyHints: keyHints))
+        let width = max(min(max(natural.fittingSize.width.rounded(.up), minWidth), maxWidth), forButtons.fittingSize.width.rounded(.up))
         return ConfirmationCardView(content: content, buttons: buttons, keyHints: keyHints, width: width)
     }
 }

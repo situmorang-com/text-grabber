@@ -38,16 +38,18 @@ final class CodeConfirmation {
         self.content = content
         let takesKeyboard = AccessibilityText.isTrusted
 
-        // The main action first, at the start of the text column; then esc's, then the ⌘ ones.
-        var buttons = [CardButton(title: content.primary.title, key: "⏎", prominent: true) { [weak self] in self?.choose(.primary) }]
-        if let escape = content.escape {
-            buttons.append(CardButton(title: escape.title, key: "⎋") { [weak self] in self?.choose(.cancel) })
-        }
-        for (index, action) in content.secondary.enumerated() {
-            buttons.append(CardButton(title: action.title, key: action.commandKey.map { "⌘" + String($0).uppercased() }) { [weak self] in
+        // The ⌘ ones at the left, then esc's, then the main action at the right.
+        var buttons = content.secondary.enumerated().map { index, action in
+            CardButton(title: action.title, key: action.commandKey.map { "⌘" + String($0).uppercased() }) { [weak self] in
                 self?.choose(.secondary(index))
-            })
+            }
         }
+        if let escape = content.escape {
+            buttons.append(CardButton(title: escape.title, key: "⎋", trailing: true) { [weak self] in self?.choose(.cancel) })
+        }
+        buttons.append(CardButton(title: content.primary.title, key: "⏎", prominent: true, trailing: true) { [weak self] in
+            self?.choose(.primary)
+        })
         let card = ConfirmationCardView.sized(content.card, buttons: buttons, keyHints: takesKeyboard)
         let view = card.onHover { [weak self] inside in
             if inside { self?.dismissal?.cancel() } else { self?.scheduleClose(after: 3) }

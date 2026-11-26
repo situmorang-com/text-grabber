@@ -166,6 +166,7 @@ private struct RecognitionSettings: View {
 
 private struct ShortcutSettings: View {
     @State private var conflicts = HotKeyCenter.shared.conflicts
+    @State private var needAccessibility = HotKeyCenter.shared.needAccessibility
     /// A shortcut that was refused because another one uses it: which section, and why.
     @State private var problem: (inOptions: Bool, message: String)?
 
@@ -179,15 +180,24 @@ private struct ShortcutSettings: View {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .foregroundStyle(.orange)
                                     .help("Another app already uses this shortcut.")
+                            } else if needAccessibility.contains(action) {
+                                Button {
+                                    AccessibilityText.requestAccess()
+                                } label: {
+                                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                                }
+                                .buttonStyle(.borderless)
+                                .help("A shortcut pressed twice needs Accessibility. Click to allow it.")
                             }
-                            ShortcutRecorder(slot: action, report: { problem = $0.map { (false, $0) } }) {
+                            ShortcutRecorder(slot: action, allowsTwice: true, report: { problem = $0.map { (false, $0) } }) {
                                 conflicts = HotKeyCenter.shared.conflicts
+                                needAccessibility = HotKeyCenter.shared.needAccessibility
                             }
                         }
                     }
                 }
             } footer: {
-                footer("Click a shortcut, then press the new keys. Press Delete to remove it, Esc to cancel.", inOptions: false)
+                footer("Click a shortcut, then press the new keys. Press them twice quickly for a shortcut pressed twice, such as ⌥2 2: the first press then reaches the app in front a quarter second later, unless the second follows. Press Delete to remove it, Esc to cancel.", inOptions: false)
             }
             Section {
                 ForEach(CaptureOption.allCases) { option in
@@ -202,6 +212,10 @@ private struct ShortcutSettings: View {
             }
         }
         .formStyle(.grouped)
+        .onReceive(NotificationCenter.default.publisher(for: HotKeyCenter.changed)) { _ in
+            conflicts = HotKeyCenter.shared.conflicts
+            needAccessibility = HotKeyCenter.shared.needAccessibility
+        }
     }
 
     @ViewBuilder
@@ -220,12 +234,16 @@ private struct ShortcutSettings: View {
 /// A button that records the next key combination pressed.
 private struct ShortcutRecorder: View {
     let slot: any ShortcutSlot
+    /// The same keys pressed twice quickly record a shortcut pressed twice.
+    var allowsTwice = false
     /// Told why a shortcut was refused, or nil once recording starts again.
     var report: (String?) -> Void = { _ in }
     var onChange: () -> Void
     @State private var shortcut: Shortcut?
     @State private var recording = false
     @State private var monitor: Any?
+    /// A first press, saved unless the same keys come again within the double-press time.
+    @State private var first: (shortcut: Shortcut, save: DispatchWorkItem)?
 
     var body: some View {
         Button(recording ? "Press keys…" : (shortcut?.display ?? "None")) {
@@ -238,6 +256,7 @@ private struct ShortcutRecorder: View {
 
     private func start() {
         recording = true
+        HotKeyCenter.shared.recording = true
         report(nil)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
@@ -254,6 +273,17 @@ private struct ShortcutRecorder: View {
                 } else if let owner = Shortcut.owner(of: new, besides: slot) {
                     NSSound.beep()
                     report("\(new.display) is already used for “\(owner.title)”.")
+                } else if allowsTwice, let first, first.shortcut.sameKeys(as: new), !event.isARepeat {
+                    first.save.cancel()
+                    self.first = nil
+                    save(new.doubled)
+                } else if allowsTwice {
+                    guard !event.isARepeat else { return nil }
+                    first?.save.cancel()
+                    let work = DispatchWorkItem { save(new) }
+                    first = (new, work)
+                    // A little longer than the shortcut allows: recording should not be the hard part.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + DoublePressMachine.window + 0.15, execute: work)
                 } else {
                     save(new)
                 }
@@ -265,6 +295,8 @@ private struct ShortcutRecorder: View {
     }
 
     private func save(_ new: Shortcut?) {
+        first?.save.cancel()
+        first = nil
         Shortcut.store(new, for: slot)
         shortcut = new
         HotKeyCenter.shared.reload()
@@ -275,7 +307,10 @@ private struct ShortcutRecorder: View {
     private func stop() {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+        first?.save.cancel()
+        first = nil
         recording = false
+        HotKeyCenter.shared.recording = false
     }
 
     private static func name(for event: NSEvent, fallback: String) -> String {

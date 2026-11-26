@@ -101,12 +101,22 @@ struct Shortcut: Codable, Equatable {
     var modifierFlags: UInt
     /// What to show for the key, e.g. "1" or "F5".
     var key: String
+    /// Pressed twice quickly (⌥2 2). Absent in shortcuts stored before it existed.
+    private var twice: Bool?
 
-    init(keyCode: UInt32, modifiers: NSEvent.ModifierFlags, key: String) {
+    init(keyCode: UInt32, modifiers: NSEvent.ModifierFlags, key: String, twice: Bool = false) {
         self.keyCode = keyCode
         self.modifierFlags = modifiers.intersection([.command, .shift, .option, .control]).rawValue
         self.key = key
+        self.twice = twice ? true : nil
     }
+
+    var pressedTwice: Bool { twice == true }
+
+    /// The same keys, pressed twice.
+    var doubled: Shortcut { Shortcut(keyCode: keyCode, modifiers: modifiers, key: key, twice: true) }
+
+    var machineKey: DoublePressMachine.Key { .init(code: UInt16(keyCode), modifiers: modifierFlags) }
 
     var modifiers: NSEvent.ModifierFlags { NSEvent.ModifierFlags(rawValue: modifierFlags) }
 
@@ -125,7 +135,8 @@ struct Shortcut: Codable, Equatable {
         if modifiers.contains(.option) { text += "⌥" }
         if modifiers.contains(.shift) { text += "⇧" }
         if modifiers.contains(.command) { text += "⌘" }
-        return text + baseKey.uppercased()
+        let key = baseKey.uppercased()
+        return text + key + (pressedTwice ? " " + key : "")
     }
 
     /// The key as printed on the keycap: "2", not the "@" that Shift makes of it. Recording stores the character
@@ -152,7 +163,8 @@ struct Shortcut: Codable, Equatable {
         return name.unicodeScalars.allSatisfy({ $0.properties.isWhitespace || $0.value < 0x20 }) ? nil : name
     }
 
-    /// The same key and modifiers (the stored name of the key may differ: "@" or "2").
+    /// The same key and modifiers (the stored name of the key may differ: "@" or "2"). Pressed once or twice does
+    /// not matter: the two could not both work.
     func sameKeys(as other: Shortcut) -> Bool {
         keyCode == other.keyCode && modifierFlags == other.modifierFlags
     }
@@ -195,6 +207,14 @@ final class HotKeyCenter {
     var handler: ((HotKeyAction) -> Void)?
     /// Actions whose shortcut another app already owns.
     private(set) var conflicts: Set<HotKeyAction> = []
+    /// Actions pressed twice that wait for Accessibility, which watching for a second press needs.
+    private(set) var needAccessibility: Set<HotKeyAction> = []
+    /// While true, shortcuts pressed twice reach the app (the recorder is listening for new keys).
+    var recording = false { didSet { doublePress.paused = recording } }
+
+    private let doublePress = DoublePressTap()
+    private var doubleActions: [DoublePressMachine.Key: HotKeyAction] = [:]
+    private var retry: Timer?
 
     private var references: [EventHotKeyRef] = []
     private var actions: [UInt32: HotKeyAction] = [:]
@@ -210,9 +230,17 @@ final class HotKeyCenter {
         references.removeAll()
         actions.removeAll()
         conflicts.removeAll()
+        doubleActions.removeAll()
+        needAccessibility.removeAll()
+        retry?.invalidate()
+        retry = nil
 
         for (index, action) in HotKeyAction.allCases.enumerated() {
             guard let shortcut = Shortcut.stored(for: action) else { continue }
+            if shortcut.pressedTwice {
+                doubleActions[shortcut.machineKey] = action
+                continue
+            }
             let id = UInt32(index + 1)
             var reference: EventHotKeyRef?
             let hotKeyID = EventHotKeyID(signature: Self.signature, id: id)
@@ -225,7 +253,24 @@ final class HotKeyCenter {
                 conflicts.insert(action)
             }
         }
+
+        doublePress.fire = { [weak self] key in
+            if let action = self?.doubleActions[key] { self?.handler?(action) }
+        }
+        if !doublePress.start(watching: Set(doubleActions.keys)) {
+            needAccessibility = Set(doubleActions.values)
+            // Try again once Accessibility is allowed, without asking the user to restart.
+            retry = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] timer in
+                guard AccessibilityText.isTrusted else { return }
+                timer.invalidate()
+                self?.reload()
+                NotificationCenter.default.post(name: HotKeyCenter.changed, object: nil)
+            }
+        }
     }
+
+    /// Posted when shortcuts start working without a change in Settings (Accessibility was allowed).
+    static let changed = Notification.Name("HotKeyCenter.changed")
 
     /// Registers the capture option keys until `endCaptureOptions()`; `handler` runs on the main thread for each
     /// press. Returns the options whose key could be registered.

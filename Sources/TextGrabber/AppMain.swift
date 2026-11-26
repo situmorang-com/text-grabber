@@ -235,7 +235,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func add(_ title: String, _ action: Selector, shortcut: HotKeyAction? = nil) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
-        if let shortcut, let stored = Shortcut.stored(for: shortcut) {
+        // A shortcut pressed twice has no menu form: the menu shows none.
+        if let shortcut, let stored = Shortcut.stored(for: shortcut), !stored.pressedTwice {
             item.keyEquivalent = stored.baseKey.lowercased()
             item.keyEquivalentModifierMask = stored.modifiers
         }

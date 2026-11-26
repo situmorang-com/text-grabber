@@ -24,7 +24,7 @@
 ## Features
 
 **Capture**
-- **One shortcut, anywhere.** Press ⇧⌘1, drag over anything on screen, and the text is copied. Shortcuts are yours to change.
+- **One shortcut, anywhere.** Press ⇧⌘1, drag over anything on screen, and the text is copied. Shortcuts are yours to change, and can be a key pressed twice (⌥2 2) when every combination you like is taken: the first press reaches the app in front a quarter second later unless the second follows, and this needs Accessibility.
 - **Capture the last area again**, keep every line break, or read the image on the clipboard.
 - **Options while you select**: press **C** to add the text to what is already on the clipboard, **L** to keep its line breaks, **S** to hear it read aloud. For that capture only; a small strip shows which are on.
 - **Scrolling capture** for text longer than the screen: scroll, and the pictures are joined without repeats.
@@ -182,6 +182,7 @@ URL actions, for Shortcuts ("Open URL"), Raycast, Alfred or scripts:
 | `textgrabber://edit-last` | Reopen the last capture in the editor |
 | `textgrabber://history`, `textgrabber://settings`, `textgrabber://setup` | Open those windows |
 | `textgrabber://probe?rect=x,y,w,h` | Read that screen area into the capture log only |
+| `textgrabber://demo?card=copied` | Show a confirmation with made-up content, copying nothing: `copied`, `added`, `long`, `barcode`, `link`, `textcode`; `snapshot=1` also draws it to a PNG |
 | `textgrabber://snapshot?window=setup` | Draw a window (`setup`, `settings`, `history`, `editor`) to a PNG in `~/Library/Logs/TextGrabber`, without taking focus; works while the screen is locked. `tab=general\|recognition\|shortcuts` picks the settings tab |
 
 Add `edit=1` to any capture action to open the editor for that capture, and `add=1`, `keep-lines=1` or `speak=1` (or `=0`) to start it with that option on (or off), as the C, L and S keys would.
